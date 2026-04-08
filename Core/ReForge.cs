@@ -9,7 +9,7 @@ using ReForgeFramework.UI.Examples;
 [ModInitializer(nameof(Initialize))]
 public static partial class ReForge
 {
-	private const bool EnableUiDemo = true;
+	private const bool EnableUiDemo = false;
 	private const bool EnableEventBusDemo = true;
 	private const bool EnableMixinDemo = false;
 
@@ -51,8 +51,8 @@ public static partial class ReForge
 		}
 
 		EventBus.Initialize();
-		EventExamples.Configure(EnableEventBusDemo);
-		UiBootstrapExample.Bootstrap(EnableUiDemo);
+		InitializeRuntimeSettings();
 		GD.Print("[ReForge] initialized.");
+		ApplyPostInitializationSettings();
 	}
 }

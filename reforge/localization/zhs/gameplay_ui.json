@@ -1,5 +1,9 @@
 {
   "REFORGE.UI.RUNTIME_READY": "ReForge UI 运行时已就绪",
   "REFORGE.UI.GLOBAL_BUTTON": "全局按钮",
-  "REFORGE.UI.MAIN_MENU_BUTTON": "重铸"
+  "REFORGE.UI.MAIN_MENU_BUTTON": "重铸",
+  "REFORGE.SETTINGS.TAB": "ReForge",
+  "REFORGE.SETTINGS.DEBUG_TITLE": "开启调试控制台",
+  "REFORGE.SETTINGS.DEBUG_TIP_TITLE": "调试控制台",
+  "REFORGE.SETTINGS.DEBUG_TIP_DESC": "开启后，ReForge 会在模组初始化完成后立即打开一个 C# 调试控制台。"
 }
