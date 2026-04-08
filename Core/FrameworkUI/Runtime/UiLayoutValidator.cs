@@ -20,6 +20,9 @@ internal static class UiLayoutValidator
 		float? height = NormalizeHeightValue(options.Height, "Height", controlName);
 		float? minHeight = NormalizeHeightValue(options.MinHeight, "MinHeight", controlName);
 		float? maxHeight = NormalizeHeightValue(options.MaxHeight, "MaxHeight", controlName);
+		Vector2? positionOffset = NormalizePositionOffset(options.PositionOffset, controlName);
+		UiSpacing? padding = NormalizeSpacing(options.Padding, "Padding", controlName);
+		UiSpacing? margin = NormalizeSpacing(options.Margin, "Margin", controlName);
 
 		if (minHeight.HasValue && maxHeight.HasValue && minHeight.Value > maxHeight.Value)
 		{
@@ -47,7 +50,10 @@ internal static class UiLayoutValidator
 			Height = height,
 			MinHeight = minHeight,
 			MaxHeight = maxHeight,
-			AnchorPreset = options.AnchorPreset
+			AnchorPreset = options.AnchorPreset,
+			PositionOffset = positionOffset,
+			Padding = padding,
+			Margin = margin
 		};
 	}
 
@@ -60,6 +66,43 @@ internal static class UiLayoutValidator
 
 		float raw = value.Value;
 		if (!float.IsFinite(raw) || raw < 0f)
+		{
+			GD.Print($"[ReForge.UI] Invalid {fieldName} '{raw}' on '{controlName}', value ignored.");
+			return null;
+		}
+
+		return raw;
+	}
+
+	private static Vector2? NormalizePositionOffset(Vector2? value, string controlName)
+	{
+		if (!value.HasValue)
+		{
+			return null;
+		}
+
+		Vector2 raw = value.Value;
+		if (!float.IsFinite(raw.X) || !float.IsFinite(raw.Y))
+		{
+			GD.Print($"[ReForge.UI] Invalid PositionOffset '{raw}' on '{controlName}', value ignored.");
+			return null;
+		}
+
+		return raw;
+	}
+
+	private static UiSpacing? NormalizeSpacing(UiSpacing? value, string fieldName, string controlName)
+	{
+		if (!value.HasValue)
+		{
+			return null;
+		}
+
+		UiSpacing raw = value.Value;
+		if (!float.IsFinite(raw.Left) || raw.Left < 0f
+			|| !float.IsFinite(raw.Top) || raw.Top < 0f
+			|| !float.IsFinite(raw.Right) || raw.Right < 0f
+			|| !float.IsFinite(raw.Bottom) || raw.Bottom < 0f)
 		{
 			GD.Print($"[ReForge.UI] Invalid {fieldName} '{raw}' on '{controlName}', value ignored.");
 			return null;

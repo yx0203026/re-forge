@@ -43,6 +43,62 @@ public abstract class UiElement : IUiElement
 		return this;
 	}
 
+	public UiElement WithPositionOffset(float x, float y)
+	{
+		return WithPositionOffset(new Vector2(x, y));
+	}
+
+	public UiElement WithPositionOffset(Vector2 offset)
+	{
+		_layoutOptions.PositionOffset = offset;
+		ReapplyIfBuilt();
+		return this;
+	}
+
+	public UiElement WithPadding(float all)
+	{
+		return WithPadding(UiSpacing.All(all));
+	}
+
+	public UiElement WithPadding(float horizontal, float vertical)
+	{
+		return WithPadding(UiSpacing.Axis(horizontal, vertical));
+	}
+
+	public UiElement WithPadding(float left, float top, float right, float bottom)
+	{
+		return WithPadding(new UiSpacing(left, top, right, bottom));
+	}
+
+	public UiElement WithPadding(UiSpacing spacing)
+	{
+		_layoutOptions.Padding = spacing;
+		ReapplyIfBuilt();
+		return this;
+	}
+
+	public UiElement WithMargin(float all)
+	{
+		return WithMargin(UiSpacing.All(all));
+	}
+
+	public UiElement WithMargin(float horizontal, float vertical)
+	{
+		return WithMargin(UiSpacing.Axis(horizontal, vertical));
+	}
+
+	public UiElement WithMargin(float left, float top, float right, float bottom)
+	{
+		return WithMargin(new UiSpacing(left, top, right, bottom));
+	}
+
+	public UiElement WithMargin(UiSpacing spacing)
+	{
+		_layoutOptions.Margin = spacing;
+		ReapplyIfBuilt();
+		return this;
+	}
+
 	public UiElement OnHoverEnter(Action<Control> handler)
 	{
 		ArgumentNullException.ThrowIfNull(handler);
@@ -98,6 +154,27 @@ public abstract class UiElement : IUiElement
 	public UiElement WithModulate(Color color)
 	{
 		_visualOptions.SelfModulate = color;
+		ReapplyIfBuilt();
+		return this;
+	}
+
+	/// <summary>
+	/// 设置控件层级优先级（映射到 Godot 的 ZIndex / ZAsRelative）。
+	/// </summary>
+	public UiElement WithLayerPriority(int priority, bool relativeToParent = true)
+	{
+		_visualOptions.LayerPriority = priority;
+		_visualOptions.LayerPriorityRelative = relativeToParent;
+		ReapplyIfBuilt();
+		return this;
+	}
+
+	/// <summary>
+	/// 设置控件显示作用域。
+	/// </summary>
+	public UiElement WithScope(UiVisibilityScope scope)
+	{
+		_visualOptions.VisibilityScope = scope;
 		ReapplyIfBuilt();
 		return this;
 	}

@@ -12,6 +12,7 @@ internal static class UiVisualApplier
 {
 	private const string TextureNodeName = "ReForgeUiTexture";
 	private static readonly StringName MetaCenterPivotBound = "__reforge_center_pivot_bound";
+	private static readonly StringName MetaVisibilityScope = "__reforge_visibility_scope";
 
 	public static void Apply(Control control, UiVisualOptions options)
 	{
@@ -25,12 +26,30 @@ internal static class UiVisualApplier
 			control.SelfModulate = options.SelfModulate.Value;
 		}
 
+		if (options.LayerPriority.HasValue)
+		{
+			control.ZIndex = options.LayerPriority.Value;
+			control.ZAsRelative = options.LayerPriorityRelative;
+		}
+
+		control.SetMeta(MetaVisibilityScope, (int)options.VisibilityScope);
+
 		if (options.CenterPivot)
 		{
 			BindCenterPivot(control);
 		}
 
 		ApplyTexture(control, options);
+	}
+
+	internal static UiVisibilityScope GetVisibilityScope(Control control)
+	{
+		if (!control.HasMeta(MetaVisibilityScope))
+		{
+			return UiVisibilityScope.Always;
+		}
+
+		return (UiVisibilityScope)(int)control.GetMeta(MetaVisibilityScope);
 	}
 
 	private static void BindCenterPivot(Control control)

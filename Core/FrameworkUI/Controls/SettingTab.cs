@@ -128,6 +128,18 @@ public sealed partial class SettingTab : UiElement
 		return this;
 	}
 
+	public new SettingTab WithPositionOffset(float x, float y)
+	{
+		base.WithPositionOffset(x, y);
+		return this;
+	}
+
+	public new SettingTab WithPositionOffset(Vector2 offset)
+	{
+		base.WithPositionOffset(offset);
+		return this;
+	}
+
 	public SettingTab WithText(string text)
 	{
 		_text = text;

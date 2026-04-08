@@ -13,6 +13,12 @@ public sealed class UiVisualOptions
 
 	public Color? SelfModulate { get; set; }
 
+	public int? LayerPriority { get; set; }
+
+	public bool LayerPriorityRelative { get; set; } = true;
+
+	public UiVisibilityScope VisibilityScope { get; set; } = UiVisibilityScope.Always;
+
 	public bool CenterPivot { get; set; }
 
 	public Texture2D? Texture { get; set; }

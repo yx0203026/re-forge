@@ -1,5 +1,7 @@
 #nullable enable
 
+using Godot;
+
 namespace ReForgeFramework.UI.Abstractions;
 
 /// <summary>
@@ -15,6 +17,12 @@ public sealed class UiLayoutOptions
 
 	public UiAnchorPreset? AnchorPreset { get; set; }
 
+	public Vector2? PositionOffset { get; set; }
+
+	public UiSpacing? Padding { get; set; }
+
+	public UiSpacing? Margin { get; set; }
+
 	public UiLayoutOptions Clone()
 	{
 		return new UiLayoutOptions
@@ -22,7 +30,10 @@ public sealed class UiLayoutOptions
 			Height = Height,
 			MinHeight = MinHeight,
 			MaxHeight = MaxHeight,
-			AnchorPreset = AnchorPreset
+			AnchorPreset = AnchorPreset,
+			PositionOffset = PositionOffset,
+			Padding = Padding,
+			Margin = Margin
 		};
 	}
 }

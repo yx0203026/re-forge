@@ -14,6 +14,11 @@ internal static class UiLayoutApplier
 	private static readonly StringName MetaMinHeight = "__reforge_layout_min_height";
 	private static readonly StringName MetaMaxHeight = "__reforge_layout_max_height";
 	private static readonly StringName MetaAnchorPreset = "__reforge_layout_anchor_preset";
+	private static readonly StringName MetaPositionOffset = "__reforge_layout_position_offset";
+	private static readonly StringName MetaAppliedPositionOffset = "__reforge_layout_applied_position_offset";
+	private static readonly StringName MetaPadding = "__reforge_layout_padding";
+	private static readonly StringName MetaMargin = "__reforge_layout_margin";
+	private static readonly StringName MetaAppliedMargin = "__reforge_layout_applied_margin";
 
 	public static void Apply(Control control, UiLayoutOptions? options)
 	{
@@ -22,7 +27,13 @@ internal static class UiLayoutApplier
 
 	public static void ReapplyFromMetadata(Control control)
 	{
-		if (!control.HasMeta(MetaHeight) && !control.HasMeta(MetaMinHeight) && !control.HasMeta(MetaMaxHeight) && !control.HasMeta(MetaAnchorPreset))
+		if (!control.HasMeta(MetaHeight)
+			&& !control.HasMeta(MetaMinHeight)
+			&& !control.HasMeta(MetaMaxHeight)
+			&& !control.HasMeta(MetaAnchorPreset)
+			&& !control.HasMeta(MetaPositionOffset)
+			&& !control.HasMeta(MetaPadding)
+			&& !control.HasMeta(MetaMargin))
 		{
 			return;
 		}
@@ -34,6 +45,15 @@ internal static class UiLayoutApplier
 			MaxHeight = control.HasMeta(MetaMaxHeight) ? (float?)control.GetMeta(MetaMaxHeight) : null,
 			AnchorPreset = control.HasMeta(MetaAnchorPreset)
 				? (UiAnchorPreset?)(int)control.GetMeta(MetaAnchorPreset)
+				: null,
+			PositionOffset = control.HasMeta(MetaPositionOffset)
+				? (Vector2?)((Vector2)control.GetMeta(MetaPositionOffset))
+				: null,
+			Padding = control.HasMeta(MetaPadding)
+				? (UiSpacing?)FromVector4((Vector4)control.GetMeta(MetaPadding))
+				: null,
+			Margin = control.HasMeta(MetaMargin)
+				? (UiSpacing?)FromVector4((Vector4)control.GetMeta(MetaMargin))
 				: null
 		};
 
@@ -43,10 +63,12 @@ internal static class UiLayoutApplier
 	private static void ApplyInternal(Control control, UiLayoutOptions? options, bool persistMetadata)
 	{
 		UiLayoutOptions normalized = UiLayoutValidator.Normalize(options, control.Name.ToString());
+		bool anchorPresetApplied = false;
 
-		if (normalized.AnchorPreset.HasValue)
+		if (normalized.AnchorPreset is UiAnchorPreset anchorPreset)
 		{
-			control.SetAnchorsAndOffsetsPreset(MapPreset(normalized.AnchorPreset.Value));
+			anchorPresetApplied = true;
+			control.SetAnchorsAndOffsetsPreset(MapPreset(anchorPreset));
 		}
 
 		Vector2 minSize = control.CustomMinimumSize;
@@ -67,6 +89,10 @@ internal static class UiLayoutApplier
 		{
 			control.Size = new Vector2(control.Size.X, normalized.MaxHeight.Value);
 		}
+
+		ApplyMargin(control, normalized.Margin, anchorPresetApplied);
+		ApplyPositionOffset(control, normalized.PositionOffset, anchorPresetApplied);
+		ApplyPadding(control, normalized.Padding);
 
 		if (!persistMetadata)
 		{
@@ -97,6 +123,108 @@ internal static class UiLayoutApplier
 		{
 			control.SetMeta(MetaAnchorPreset, (int)options.AnchorPreset.Value);
 		}
+
+		if (options.PositionOffset.HasValue)
+		{
+			control.SetMeta(MetaPositionOffset, options.PositionOffset.Value);
+		}
+
+		if (options.Padding.HasValue)
+		{
+			control.SetMeta(MetaPadding, ToVector4(options.Padding.Value));
+		}
+
+		if (options.Margin.HasValue)
+		{
+			control.SetMeta(MetaMargin, ToVector4(options.Margin.Value));
+		}
+	}
+
+	private static void ApplyPositionOffset(Control control, Vector2? positionOffset, bool anchorPresetApplied)
+	{
+		if (!positionOffset.HasValue)
+		{
+			return;
+		}
+
+		Vector2 previousApplied = Vector2.Zero;
+		if (!anchorPresetApplied && control.HasMeta(MetaAppliedPositionOffset))
+		{
+			previousApplied = (Vector2)control.GetMeta(MetaAppliedPositionOffset);
+		}
+
+		Vector2 target = positionOffset.Value;
+		Vector2 delta = target - previousApplied;
+		if (delta != Vector2.Zero)
+		{
+			control.OffsetLeft += delta.X;
+			control.OffsetRight += delta.X;
+			control.OffsetTop += delta.Y;
+			control.OffsetBottom += delta.Y;
+		}
+
+		control.SetMeta(MetaAppliedPositionOffset, target);
+	}
+
+	private static void ApplyMargin(Control control, UiSpacing? margin, bool anchorPresetApplied)
+	{
+		if (!margin.HasValue)
+		{
+			return;
+		}
+
+		Vector4 previousApplied = Vector4.Zero;
+		if (!anchorPresetApplied && control.HasMeta(MetaAppliedMargin))
+		{
+			previousApplied = (Vector4)control.GetMeta(MetaAppliedMargin);
+		}
+
+		Vector4 target = ToVector4(margin.Value);
+		Vector4 delta = target - previousApplied;
+		if (delta != Vector4.Zero)
+		{
+			control.OffsetLeft += delta.X;
+			control.OffsetTop += delta.Y;
+			control.OffsetRight -= delta.Z;
+			control.OffsetBottom -= delta.W;
+		}
+
+		control.SetMeta(MetaAppliedMargin, target);
+	}
+
+	private static void ApplyPadding(Control control, UiSpacing? padding)
+	{
+		if (!padding.HasValue)
+		{
+			return;
+		}
+
+		UiSpacing value = padding.Value;
+		int left = Mathf.RoundToInt(value.Left);
+		int top = Mathf.RoundToInt(value.Top);
+		int right = Mathf.RoundToInt(value.Right);
+		int bottom = Mathf.RoundToInt(value.Bottom);
+
+		// 统一写入两组常见常量名，提高不同 Godot 控件的兼容命中率。
+		control.AddThemeConstantOverride("margin_left", left);
+		control.AddThemeConstantOverride("margin_top", top);
+		control.AddThemeConstantOverride("margin_right", right);
+		control.AddThemeConstantOverride("margin_bottom", bottom);
+
+		control.AddThemeConstantOverride("content_margin_left", left);
+		control.AddThemeConstantOverride("content_margin_top", top);
+		control.AddThemeConstantOverride("content_margin_right", right);
+		control.AddThemeConstantOverride("content_margin_bottom", bottom);
+	}
+
+	private static Vector4 ToVector4(UiSpacing spacing)
+	{
+		return new Vector4(spacing.Left, spacing.Top, spacing.Right, spacing.Bottom);
+	}
+
+	private static UiSpacing FromVector4(Vector4 spacing)
+	{
+		return new UiSpacing(spacing.X, spacing.Y, spacing.Z, spacing.W);
 	}
 
 	private static Control.LayoutPreset MapPreset(UiAnchorPreset preset)

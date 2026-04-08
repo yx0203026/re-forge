@@ -4,8 +4,14 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Godot;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Screens.Map;
+using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
+using ReForgeFramework.UI.Abstractions;
 using ReForgeFramework.UI.SystemAreas;
 
 namespace ReForgeFramework.UI.Runtime;
@@ -17,6 +23,8 @@ public partial class UiRuntimeNode : Node
 	private const string RuntimeNodeName = "ReForgeUiRuntime";
 	private const string GlobalLayerName = "ReForgeGlobalUiLayer";
 	private const string GlobalRootName = "ReForgeGlobalUiRoot";
+	private const string MainMenuRootPath = "/root/Game/RootSceneContainer/MainMenu";
+	private const string MainMenuSubmenusNodeName = "Submenus";
 	private const string ReForgeNodePrefix = "ReForge";
 	private static readonly string[] MainMenuPanelNodeNames =
 	{
@@ -42,6 +50,7 @@ public partial class UiRuntimeNode : Node
 	private static UiRuntimeNode? _instance;
 
 	private readonly List<PendingMount> _pendingMounts = new();
+	private readonly List<Control> _scopedVisibilityControls = new();
 	private bool _attachScheduled;
 	private bool _pendingFlushScheduled;
 	private double _pendingRetryElapsed;
@@ -89,6 +98,8 @@ public partial class UiRuntimeNode : Node
 
 	public override void _Process(double delta)
 	{
+		RefreshScopedVisibilityControls();
+
 		if (_pendingMounts.Count == 0)
 		{
 			_pendingRetryElapsed = 0;
@@ -119,6 +130,7 @@ public partial class UiRuntimeNode : Node
 		}
 
 		AttachControl(_globalRoot, node);
+		TrackScopedVisibilityIfNeeded(node);
 	}
 
 	public void MountToArea(SystemUiArea area, Control node)
@@ -133,10 +145,12 @@ public partial class UiRuntimeNode : Node
 			if (area == SystemUiArea.SettingTabPanel)
 			{
 				AttachSettingTab(host, node);
+				TrackScopedVisibilityIfNeeded(node);
 				return;
 			}
 
 			AttachControl(host, node);
+			TrackScopedVisibilityIfNeeded(node);
 			return;
 		}
 
@@ -248,9 +262,134 @@ public partial class UiRuntimeNode : Node
 			{
 				AttachControl(host, item.Node);
 			}
+
+			TrackScopedVisibilityIfNeeded(item.Node);
 			_pendingMounts.RemoveAt(i);
 			GD.Print($"[ReForge.UI] Pending mount for '{item.Node.Name}' attached to '{item.Area}'.");
 		}
+	}
+
+	private void TrackScopedVisibilityIfNeeded(Control control)
+	{
+		UiVisibilityScope scope = UiVisualApplier.GetVisibilityScope(control);
+		if (scope == UiVisibilityScope.Always)
+		{
+			return;
+		}
+
+		for (int i = 0; i < _scopedVisibilityControls.Count; i++)
+		{
+			if (ReferenceEquals(_scopedVisibilityControls[i], control))
+			{
+				return;
+			}
+		}
+
+		_scopedVisibilityControls.Add(control);
+		ApplyScopeVisibility(control, scope);
+	}
+
+	private void RefreshScopedVisibilityControls()
+	{
+		for (int i = _scopedVisibilityControls.Count - 1; i >= 0; i--)
+		{
+			Control control = _scopedVisibilityControls[i];
+			if (!GodotObject.IsInstanceValid(control))
+			{
+				_scopedVisibilityControls.RemoveAt(i);
+				continue;
+			}
+
+			UiVisibilityScope scope = UiVisualApplier.GetVisibilityScope(control);
+			if (scope == UiVisibilityScope.Always)
+			{
+				_scopedVisibilityControls.RemoveAt(i);
+				continue;
+			}
+
+			ApplyScopeVisibility(control, scope);
+		}
+	}
+
+	private void ApplyScopeVisibility(Control control, UiVisibilityScope scope)
+	{
+		bool shouldShow = IsScopeVisible(scope);
+		if (control.Visible != shouldShow)
+		{
+			control.Visible = shouldShow;
+		}
+	}
+
+	private static bool IsScopeVisible(UiVisibilityScope scope)
+	{
+		if (scope == UiVisibilityScope.Always)
+		{
+			return true;
+		}
+
+		if (Engine.GetMainLoop() is not SceneTree tree || tree.Root == null)
+		{
+			return false;
+		}
+
+		Control? mainMenu = tree.Root.GetNodeOrNull<Control>(MainMenuRootPath) ?? ResolveMainMenuScreen(tree.Root);
+		bool mainMenuVisible = mainMenu?.IsVisibleInTree() ?? false;
+		bool hasVisibleMainMenuSubmenu = HasVisibleSubmenu(mainMenu?.GetNodeOrNull<Node>(MainMenuSubmenusNodeName));
+		bool inRun = NRun.Instance != null;
+
+		switch (scope)
+		{
+			case UiVisibilityScope.MainMenuOnly:
+				return mainMenuVisible;
+			case UiVisibilityScope.MainMenuHomeOnly:
+				return mainMenuVisible && !hasVisibleMainMenuSubmenu;
+			case UiVisibilityScope.MainMenuSubmenuOnly:
+				return mainMenuVisible && hasVisibleMainMenuSubmenu;
+			case UiVisibilityScope.SettingsOnly:
+				return ResolveSettingScreen(tree.Root)?.IsVisibleInTree() ?? false;
+			case UiVisibilityScope.RunOnly:
+				return inRun;
+			case UiVisibilityScope.RunMapOnly:
+				return inRun && (NMapScreen.Instance?.IsOpen ?? false);
+			case UiVisibilityScope.RunOverlayOnly:
+				return inRun && ((NOverlayStack.Instance?.ScreenCount ?? 0) > 0);
+			case UiVisibilityScope.RunCapstoneOnly:
+				return inRun && NCapstoneContainer.Instance?.CurrentCapstoneScreen != null;
+			case UiVisibilityScope.ModalOnly:
+				return NModalContainer.Instance?.OpenModal != null;
+			case UiVisibilityScope.RunEventRoomOnly:
+				return inRun && NRun.Instance?.EventRoom != null;
+			case UiVisibilityScope.RunCombatRoomOnly:
+				return inRun && NRun.Instance?.CombatRoom != null;
+			case UiVisibilityScope.RunMerchantRoomOnly:
+				return inRun && NRun.Instance?.MerchantRoom != null;
+			case UiVisibilityScope.RunRestSiteRoomOnly:
+				return inRun && NRun.Instance?.RestSiteRoom != null;
+			case UiVisibilityScope.RunTreasureRoomOnly:
+				return inRun && NRun.Instance?.TreasureRoom != null;
+			case UiVisibilityScope.RunMapRoomOnly:
+				return inRun && NRun.Instance?.MapRoom != null;
+			default:
+				return true;
+		}
+	}
+
+	private static bool HasVisibleSubmenu(Node? submenusRoot)
+	{
+		if (submenusRoot == null)
+		{
+			return false;
+		}
+
+		foreach (Node child in submenusRoot.GetChildren())
+		{
+			if (child is CanvasItem canvasItem && canvasItem.Visible)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static bool TryResolveArea(SystemUiArea area, out Control host)
@@ -826,15 +965,18 @@ public partial class UiRuntimeNode : Node
 	{
 		if (child.GetParent() == parent)
 		{
+			UiLayoutApplier.ReapplyFromMetadata(child);
 			return;
 		}
 
 		if (child.GetParent() == null)
 		{
 			parent.AddChild(child);
+			UiLayoutApplier.ReapplyFromMetadata(child);
 			return;
 		}
 
 		child.Reparent(parent, keepGlobalTransform: true);
+		UiLayoutApplier.ReapplyFromMetadata(child);
 	}
 }
