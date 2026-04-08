@@ -1,0 +1,20 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Build outputs
+bin/
+**/bin/
+build/
+**/build/
+
+# Editor and IDE
+.vscode/
+.idea/
+.vs/
+
+# Godot uid metadata
+*.uid
+
+# Spec workflow
+.spec-workflow/
