@@ -67,22 +67,30 @@ public static partial class ReForge
 		}
 
 		_postInitializeScheduled = true;
+
+		// 如果主循环已就绪，则在下一帧执行 Post-Initialization 逻辑；
+		// 否则直接执行（这可能会导致某些依赖于主循环的功能无法正常工作）。
 		if (Engine.GetMainLoop() is SceneTree tree)
 		{
+
+			// 使用 OneShot 连接确保只执行一次，并且在主循环就绪后立即执行。
 			tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(() =>
 			{
 				_postInitializeScheduled = false;
 				RefreshLocalizationTablesForLoadedMods();
 				InitializeRuntimeSettings();
 				ApplyPostInitializationSettings();
+				BuildLogo();
 			}), (uint)GodotObject.ConnectFlags.OneShot);
 			return;
 		}
 
+		// 主循环未就绪，直接执行 Post-Initialization 逻辑（可能存在风险）。
 		_postInitializeScheduled = false;
 		RefreshLocalizationTablesForLoadedMods();
 		InitializeRuntimeSettings();
 		ApplyPostInitializationSettings();
+		BuildLogo();
 	}
 
 	private static void RefreshLocalizationTablesForLoadedMods()

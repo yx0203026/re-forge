@@ -10,7 +10,7 @@ public sealed class MainMenuScreenHost : SystemUiAreaHost
 	private readonly MainMenuButtonPanelHost _mainMenuButtonPanelHost = new();
 
 	internal MainMenuScreenHost()
-		: base(SystemUiArea.MainMenuButtonPanel)
+		: base(SystemUiArea.MainMenuScreen)
 	{
 	}
 

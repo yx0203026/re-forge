@@ -4,6 +4,7 @@ using ReForgeFramework.UI.Controls;
 using ReForgeFramework.UI.Panels;
 using ReForgeFramework.UI.Runtime;
 using UiButton = ReForgeFramework.UI.Controls.Button;
+using UiImage = ReForgeFramework.UI.Controls.Image;
 using UiLabel = ReForgeFramework.UI.Controls.Label;
 using UiRichText = ReForgeFramework.UI.Controls.RichText;
 
@@ -79,6 +80,13 @@ public static class UiBootstrapExample
 			new MainMenuButton("ReForge", () => GD.Print("[ReForge.UI] MainMenu button clicked."), locTable: "gameplay_ui", locEntryKey: "REFORGE.UI.MAIN_MENU_BUTTON")
 				.WithHeight(46f)
 				.WithAnchor(UiAnchorPreset.Stretch)
+		);
+
+		ReForge.UI.GetMainMenuScreen().AddChild(
+			new UiImage("res://icon.svg")
+				.WithAnchor(UiAnchorPreset.Center)
+				.WithScale(2.0f)
+				.WithCenterPivot()
 		);
 
 		var settingTabs = ReForge.UI.GetSettingsScreen().GetSettingTabPanel();

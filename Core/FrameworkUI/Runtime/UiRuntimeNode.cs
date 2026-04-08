@@ -265,6 +265,8 @@ public partial class UiRuntimeNode : Node
 		{
 			SystemUiArea.MainMenuButtonPanel => ResolveMainMenuPanel(tree.Root),
 			SystemUiArea.SettingTabPanel => ResolveSettingTabPanel(tree.Root),
+			SystemUiArea.MainMenuScreen => ResolveMainMenuScreen(tree.Root),
+			SystemUiArea.SettingScreen => ResolveSettingScreen(tree.Root),
 			_ => null
 		};
 
@@ -276,6 +278,34 @@ public partial class UiRuntimeNode : Node
 		host = resolved;
 
 		return host != null && GodotObject.IsInstanceValid(host) && host.IsInsideTree();
+	}
+
+	private static Control? ResolveMainMenuScreen(Node root)
+	{
+		// 优先查找名为 MainMenuScreen 的节点
+		Control? screen = FindControlByName(root, "MainMenuScreen");
+		if (screen != null)
+		{
+			return screen;
+		}
+
+		// 备选方案：通过 MainMenuButtonPanel 的父节点推断
+		Control? panel = ResolveMainMenuPanel(root);
+		return panel?.GetParent() as Control;
+	}
+
+	private static Control? ResolveSettingScreen(Node root)
+	{
+		// 优先查找名为 SettingsScreen 的节点
+		Control? screen = FindControlByName(root, "SettingsScreen");
+		if (screen != null)
+		{
+			return screen;
+		}
+
+		// 备选方案：通过 NSettingsTabManager 的父节点推断
+		NSettingsTabManager? manager = FindSettingsTabManagerByType(root);
+		return manager?.GetParent() as Control;
 	}
 
 	internal static bool TryDetectAreaHostFromNode(Node node, out SystemUiArea area)

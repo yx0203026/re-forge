@@ -8,7 +8,7 @@ public sealed class SettingsScreenHost : SystemUiAreaHost
 	private readonly SettingTabPanelHost _settingTabPanelHost = new();
 
 	internal SettingsScreenHost()
-		: base(SystemUiArea.SettingTabPanel)
+		: base(SystemUiArea.SettingScreen)
 	{
 	}
 
