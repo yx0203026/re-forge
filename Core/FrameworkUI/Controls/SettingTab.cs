@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using Godot;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
@@ -15,10 +16,13 @@ public sealed partial class SettingTab : UiElement
 {
 	private const string SettingsTabScenePath = "res://scenes/screens/settings_tab.tscn";
 	private const string MetaReadyHookBound = "__reforge_setting_tab_ready_hook_bound";
+	private const string SafetyPlaceholderName = "ReForgeSettingScreenSafetyPlaceholder";
 
 	private string _text;
 	private readonly Action? _onClick;
 	private bool _selected;
+	private readonly List<IUiElement> _entries = new();
+	private VBoxContainer? _content;
 
 	public SettingTab(string text, Action? onClick = null, bool selected = false, string? screenKey = null)
 	{
@@ -31,6 +35,74 @@ public sealed partial class SettingTab : UiElement
 	public string ScreenKey { get; }
 
 	public bool SelectedByDefault => _selected;
+
+	public SettingTab Add(IUiElement entry)
+	{
+		if (entry is SettingOptionItem settingOptionItem && !settingOptionItem.HasHoverTip)
+		{
+			throw new InvalidOperationException(
+				$"Setting option '{settingOptionItem.Title}' must configure hover tip via WithHoverTip(...) before adding to screen '{ScreenKey}'.");
+		}
+
+		if (!_entries.Contains(entry))
+		{
+			_entries.Add(entry);
+		}
+
+		if (_content != null)
+		{
+			AttachEntry(entry);
+		}
+
+		return this;
+	}
+
+	/// <summary>
+	/// 添加“标题 + 勾选框”设置条目。
+	/// </summary>
+	public SettingTab AddToggle(
+		string title,
+		bool initialValue,
+		Action<bool>? onToggled = null,
+		string? tipLocTable = null,
+		string? tipTitleEntryKey = null,
+		string? tipDescriptionEntryKey = null)
+	{
+		SettingOptionItem item = SettingOptionItem.Toggle(title, initialValue, onToggled);
+		if (!string.IsNullOrWhiteSpace(tipLocTable)
+			&& !string.IsNullOrWhiteSpace(tipTitleEntryKey)
+			&& !string.IsNullOrWhiteSpace(tipDescriptionEntryKey))
+		{
+			item.WithHoverTip(tipLocTable, tipTitleEntryKey, tipDescriptionEntryKey);
+		}
+
+		return Add(item);
+	}
+
+	/// <summary>
+	/// 添加“标题 + 官方反馈风格按钮”设置条目。
+	/// </summary>
+	public SettingTab AddFeedbackButton(
+		string title,
+		string buttonText,
+		Action? onPressed = null,
+		string? textKey = null,
+		string? locTable = null,
+		string? locEntryKey = null,
+		string? tipLocTable = null,
+		string? tipTitleEntryKey = null,
+		string? tipDescriptionEntryKey = null)
+	{
+		SettingOptionItem item = SettingOptionItem.FeedbackButton(title, buttonText, onPressed, textKey, locTable, locEntryKey);
+		if (!string.IsNullOrWhiteSpace(tipLocTable)
+			&& !string.IsNullOrWhiteSpace(tipTitleEntryKey)
+			&& !string.IsNullOrWhiteSpace(tipDescriptionEntryKey))
+		{
+			item.WithHoverTip(tipLocTable, tipTitleEntryKey, tipDescriptionEntryKey);
+		}
+
+		return Add(item);
+	}
 
 	public new SettingTab WithHeight(float height)
 	{
@@ -181,5 +253,81 @@ public sealed partial class SettingTab : UiElement
 		}
 
 		return fallback;
+	}
+
+	internal void BindPanel(NSettingsPanel panel)
+	{
+		_content = panel.GetNodeOrNull<VBoxContainer>("VBoxContainer");
+		if (_content == null)
+		{
+			return;
+		}
+
+		if (_entries.Count == 0)
+		{
+			EnsureSafetyPlaceholder();
+			return;
+		}
+
+		RemoveSafetyPlaceholder();
+		foreach (IUiElement entry in _entries)
+		{
+			AttachEntry(entry);
+		}
+	}
+
+	private void AttachEntry(IUiElement entry)
+	{
+		if (_content == null)
+		{
+			return;
+		}
+
+		Control control = entry.Build();
+		if (!GodotObject.IsInstanceValid(control))
+		{
+			return;
+		}
+
+		RemoveSafetyPlaceholder();
+		if (control.GetParent() == _content)
+		{
+			return;
+		}
+
+		if (control.GetParent() == null)
+		{
+			_content.AddChild(control);
+		}
+		else
+		{
+			control.Reparent(_content, keepGlobalTransform: true);
+		}
+	}
+
+	private void EnsureSafetyPlaceholder()
+	{
+		if (_content == null || _content.GetNodeOrNull<NButton>(SafetyPlaceholderName) != null)
+		{
+			return;
+		}
+
+		NButton placeholder = new()
+		{
+			Name = SafetyPlaceholderName,
+			Visible = false,
+			FocusMode = Control.FocusModeEnum.All,
+			MouseFilter = Control.MouseFilterEnum.Ignore
+		};
+
+		_content.AddChild(placeholder);
+	}
+
+	private void RemoveSafetyPlaceholder()
+	{
+		if (_content?.GetNodeOrNull<NButton>(SafetyPlaceholderName) is { } placeholder)
+		{
+			placeholder.QueueFree();
+		}
 	}
 }

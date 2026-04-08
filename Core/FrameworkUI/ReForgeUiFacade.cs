@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using System.Collections.Generic;
 using ReForgeFramework.UI.Localization;
 using ReForgeFramework.UI.Runtime;
@@ -9,8 +10,8 @@ namespace ReForgeFramework.UI;
 
 public sealed class ReForgeUiFacade
 {
-	private readonly SystemUiAreaHost _mainMenuHost = new(SystemUiArea.MainMenuButtonPanel);
-	private readonly SettingTabPanelHost _settingTabHost = new();
+	private readonly MainMenuScreenHost _mainMenuHost = new();
+	private readonly SettingsScreenHost _settingsScreenHost = new();
 
 	public string CurrentLocale => UiLocalization.CurrentLocale;
 
@@ -20,20 +21,40 @@ public sealed class ReForgeUiFacade
 		UiApiLifecyclePatcher.EnsurePatched(this);
 	}
 
-	public SystemUiAreaHost GetMainMenuButtonPanel()
+	public MainMenuScreenHost GetMainMenuScreen()
 	{
 		return _mainMenuHost;
 	}
 
+	public SettingsScreenHost GetSettingsScreen()
+	{
+		return _settingsScreenHost;
+	}
+
+	public SystemUiAreaHost GetMainMenuButtonPanel()
+	{
+		return _mainMenuHost.GetMainMenuButtonPanel();
+	}
+
 	public SettingTabPanelHost GetSettingTabPanel()
 	{
-		return _settingTabHost;
+		return _settingsScreenHost.GetSettingTabPanel();
+	}
+
+	public SystemUiAreaHost GetScreen(OfficialScreenEnum screen)
+	{
+		return screen switch
+		{
+			OfficialScreenEnum.MainMenu => _mainMenuHost,
+			OfficialScreenEnum.Settings => _settingsScreenHost,
+			_ => throw new ArgumentOutOfRangeException(nameof(screen), screen, "Unsupported official screen enum.")
+		};
 	}
 
 	public void ReinjectSystemAreas()
 	{
-		_mainMenuHost.RemountAll();
-		_settingTabHost.RemountAll();
+		_mainMenuHost.RemountMainMenu();
+		_settingsScreenHost.RemountSettings();
 	}
 
 	public void ReinjectArea(SystemUiArea area)
@@ -41,10 +62,10 @@ public sealed class ReForgeUiFacade
 		switch (area)
 		{
 			case SystemUiArea.MainMenuButtonPanel:
-				_mainMenuHost.RemountAll();
+				_mainMenuHost.RemountMainMenu();
 				break;
 			case SystemUiArea.SettingTabPanel:
-				_settingTabHost.RemountAll();
+				_settingsScreenHost.RemountSettings();
 				break;
 		}
 	}

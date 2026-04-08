@@ -1,18 +1,16 @@
 #nullable enable
 
 using System;
+using System.Diagnostics;
 using System.Text.Json;
 using Godot;
-using MegaCrit.Sts2.Core.HoverTips;
-using MegaCrit.Sts2.Core.Localization;
-using MegaCrit.Sts2.Core.Nodes.HoverTips;
-using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using ReForgeFramework.UI.Controls;
 using ReForgeFramework.UI.SystemAreas;
 
 public static partial class ReForge
 {
 	private const string SettingsScreenKey = "ReForge.Settings";
+	private const string FeedbackRepositoryUrl = "https://github.com/yx0203026/re-forge";
 	private static bool _settingsInitialized;
 	private static readonly ReForgeSettingsData RuntimeSettings = ReForgeSettingsStore.Load();
 
@@ -37,24 +35,32 @@ public static partial class ReForge
 
 	private static void RegisterSettingsUi()
 	{
-		SettingTabPanelHost tabHost = UI.GetSettingTabPanel();
+		SettingsScreenHost settingsHost = UI.GetSettingsScreen();
+		SettingTabPanelHost tabHost = settingsHost.GetSettingTabPanel();
 		string tabTitle = UI.T("gameplay_ui", "REFORGE.SETTINGS.TAB", "ReForge");
 		tabHost.AddChild(new SettingTab(tabTitle, selected: false, screenKey: SettingsScreenKey).WithMinHeight(72f));
 
-		SettingScreen? screen = tabHost.GetSettingScreen(SettingsScreenKey);
-		if (screen == null)
+		SettingTab? tab = tabHost.GetSettingTab(SettingsScreenKey);
+		if (tab == null)
 		{
-			GD.PrintErr($"[ReForge.Settings] Cannot find setting screen '{SettingsScreenKey}'.");
+			GD.PrintErr($"[ReForge.Settings] Cannot find setting tab '{SettingsScreenKey}'.");
 			return;
 		}
 
 		string optionTitle = UI.T("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TITLE", "Enable Debug Console");
-		SettingOptionItem debugToggle = SettingOptionItem.Toggle(optionTitle, RuntimeSettings.EnableDebugConsole, OnDebugToggled);
-		debugToggle
-			.OnHoverEnter(ShowDebugHoverTip)
-			.OnHoverExit(RemoveDebugHoverTip);
+		SettingOptionItem debugToggle = SettingOptionItem
+			.Toggle(optionTitle, RuntimeSettings.EnableDebugConsole, OnDebugToggled)
+			.WithHoverTip("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TIP_TITLE", "REFORGE.SETTINGS.DEBUG_TIP_DESC");
 
-		screen.Add(debugToggle);
+		tab.Add(debugToggle);
+
+		string feedbackTitle = UI.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TITLE", "反馈");
+		string feedbackButtonText = UI.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_BUTTON", "反馈");
+		SettingOptionItem feedbackItem = SettingOptionItem
+			.FeedbackButton(feedbackTitle, feedbackButtonText, OpenFeedbackRepository)
+			.WithHoverTip("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TIP_TITLE", "REFORGE.SETTINGS.FEEDBACK_TIP_DESC");
+
+		tab.Add(feedbackItem);
 	}
 
 	private static void OnDebugToggled(bool enabled)
@@ -73,31 +79,33 @@ public static partial class ReForge
 		}
 	}
 
-	private static void ShowDebugHoverTip(Control owner)
+	private static void OpenFeedbackRepository()
 	{
-		if (!GodotObject.IsInstanceValid(owner))
+		GD.Print($"[ReForge.Settings] Opening feedback repository URL: {FeedbackRepositoryUrl}");
+
+		Error openResult = OS.ShellOpen(FeedbackRepositoryUrl);
+		if (openResult == Error.Ok)
 		{
+			GD.Print("[ReForge.Settings] Opened feedback repository via OS.ShellOpen.");
 			return;
 		}
 
-		NHoverTipSet.Remove(owner);
-		HoverTip tip = new(
-			new LocString("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TIP_TITLE"),
-			new LocString("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TIP_DESC")
-		);
-
-		NHoverTipSet tipSet = NHoverTipSet.CreateAndShow(owner, tip);
-		tipSet.GlobalPosition = owner.GlobalPosition + NSettingsScreen.settingTipsOffset;
-	}
-
-	private static void RemoveDebugHoverTip(Control owner)
-	{
-		if (!GodotObject.IsInstanceValid(owner))
+		try
 		{
+			Process.Start(new ProcessStartInfo
+			{
+				FileName = FeedbackRepositoryUrl,
+				UseShellExecute = true
+			});
+			GD.Print("[ReForge.Settings] Opened feedback repository via Process.Start fallback.");
 			return;
 		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.Settings] Process.Start fallback failed for URL: {FeedbackRepositoryUrl}, Error={ex.Message}");
+		}
 
-		NHoverTipSet.Remove(owner);
+		GD.PrintErr($"[ReForge.Settings] Failed to open feedback repository URL: {FeedbackRepositoryUrl}, Error={openResult}");
 	}
 
 	private sealed class ReForgeSettingsData

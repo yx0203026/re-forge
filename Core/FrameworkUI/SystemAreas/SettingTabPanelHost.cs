@@ -15,7 +15,7 @@ namespace ReForgeFramework.UI.SystemAreas;
 /// <summary>
 /// 设置页 Tab 注入宿主：注册新 Tab，并将自定义内容绑定到官方设置页滚动内容区。
 /// </summary>
-public sealed class SettingTabPanelHost
+public sealed class SettingTabPanelHost : SystemUiAreaHost
 {
 	private const string MetaSwitchBoundKey = "__reforge_setting_tab_switch_bound";
 	private const string MetaBindCompletedKey = "__reforge_setting_tab_bind_completed";
@@ -23,8 +23,12 @@ public sealed class SettingTabPanelHost
 	private const string MetaWaitManagerLoggedKey = "__reforge_setting_tab_wait_manager_logged";
 	private const string SafetyPlaceholderName = "ReForgeSettingScreenSafetyPlaceholder";
 
-	private readonly Dictionary<string, SettingScreen> _screens = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, SettingTab> _tabsByScreenKey = new(StringComparer.OrdinalIgnoreCase);
+
+	internal SettingTabPanelHost()
+		: base(SystemUiArea.SettingTabPanel)
+	{
+	}
 
 	public void AddChild(SettingTab tab)
 	{
@@ -39,12 +43,13 @@ public sealed class SettingTabPanelHost
 			_tabsByScreenKey[tab.ScreenKey] = tab;
 		}
 
-		_ = GetOrCreateScreen(tab.ScreenKey);
 		MountTab(tab);
 	}
 
-	internal void RemountAll()
+	internal new void RemountAll()
 	{
+		base.RemountAll();
+
 		foreach (SettingTab tab in _tabsByScreenKey.Values)
 		{
 			MountTab(tab);
@@ -53,8 +58,6 @@ public sealed class SettingTabPanelHost
 
 	private void MountTab(SettingTab tab)
 	{
-		SettingScreen screen = GetOrCreateScreen(tab.ScreenKey);
-
 		Control built = tab.Build();
 		UiRuntimeNode.Ensure().MountToArea(SystemUiArea.SettingTabPanel, built);
 		if (built is not NSettingsTab runtimeTab)
@@ -72,7 +75,7 @@ public sealed class SettingTabPanelHost
 				return;
 			}
 
-			if (TryBindToOfficialManager(runtimeTab, screen, tab.SelectedByDefault))
+			if (TryBindToOfficialManager(runtimeTab, tab, tab.SelectedByDefault))
 			{
 				return;
 			}
@@ -114,28 +117,17 @@ public sealed class SettingTabPanelHost
 		TryBind();
 	}
 
-	private SettingScreen GetOrCreateScreen(string screenKey)
-	{
-		if (!_screens.TryGetValue(screenKey, out SettingScreen? screen))
-		{
-			screen = new SettingScreen(screenKey);
-			_screens[screenKey] = screen;
-		}
-
-		return screen;
-	}
-
-	public SettingScreen? GetSettingScreen(string screenKey)
+	public SettingTab? GetSettingTab(string screenKey)
 	{
 		if (string.IsNullOrWhiteSpace(screenKey))
 		{
 			return null;
 		}
 
-		return _screens.TryGetValue(screenKey, out SettingScreen? screen) ? screen : null;
+		return _tabsByScreenKey.TryGetValue(screenKey, out SettingTab? tab) ? tab : null;
 	}
 
-	private static bool TryBindToOfficialManager(NSettingsTab tab, SettingScreen screen, bool selectWhenBound)
+	private static bool TryBindToOfficialManager(NSettingsTab tab, SettingTab tabModel, bool selectWhenBound)
 	{
 		if (!GodotObject.IsInstanceValid(tab))
 		{
@@ -157,7 +149,7 @@ public sealed class SettingTabPanelHost
 		{
 			if (!tab.HasMeta(MetaWaitManagerLoggedKey))
 			{
-				GD.Print($"[ReForge.UI] Waiting for NSettingsTabManager to bind screen '{screen.Key}'.");
+				GD.Print($"[ReForge.UI] Waiting for NSettingsTabManager to bind screen '{tabModel.ScreenKey}'.");
 				tab.SetMeta(MetaWaitManagerLoggedKey, true);
 			}
 			return false;
@@ -170,7 +162,7 @@ public sealed class SettingTabPanelHost
 
 		if (!TryGetTabsDictionary(manager, out IDictionary? tabs))
 		{
-			GD.Print($"[ReForge.UI] Cannot access NSettingsTabManager._tabs for screen '{screen.Key}'.");
+			GD.Print($"[ReForge.UI] Cannot access NSettingsTabManager._tabs for screen '{tabModel.ScreenKey}'.");
 			return false;
 		}
 
@@ -192,14 +184,14 @@ public sealed class SettingTabPanelHost
 
 		if (panel == null)
 		{
-			GD.Print($"[ReForge.UI] Failed to create/bind custom settings panel for '{screen.Key}'.");
+			GD.Print($"[ReForge.UI] Failed to create/bind custom settings panel for '{tabModel.ScreenKey}'.");
 			return false;
 		}
 
-		screen.BindPanel(panel);
+		tabModel.BindPanel(panel);
 		tab.SetMeta(MetaBindCompletedKey, true);
 		tab.SetMeta(MetaWaitManagerLoggedKey, false);
-		GD.Print($"[ReForge.UI] Bound custom settings screen '{screen.Key}' to panel '{panel.Name}'.");
+		GD.Print($"[ReForge.UI] Bound custom settings screen '{tabModel.ScreenKey}' to panel '{panel.Name}'.");
 		if (!tab.HasMeta(MetaSwitchBoundKey))
 		{
 			MethodInfo? switchTabTo = manager.GetType().GetMethod("SwitchTabTo", BindingFlags.Instance | BindingFlags.NonPublic, null, new[] { typeof(NSettingsTab) }, null);

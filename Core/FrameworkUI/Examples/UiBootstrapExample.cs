@@ -74,23 +74,24 @@ public static class UiBootstrapExample
 		// );
 		// panel.Show();
 
-		var mainMenu = ReForge.UI.GetMainMenuButtonPanel();
+		var mainMenu = ReForge.UI.GetMainMenuScreen().GetMainMenuButtonPanel();
 		mainMenu.AddChild(
 			new MainMenuButton("ReForge", () => GD.Print("[ReForge.UI] MainMenu button clicked."), locTable: "gameplay_ui", locEntryKey: "REFORGE.UI.MAIN_MENU_BUTTON")
 				.WithHeight(46f)
 				.WithAnchor(UiAnchorPreset.Stretch)
 		);
 
-		var settingTabs = ReForge.UI.GetSettingTabPanel();
+		var settingTabs = ReForge.UI.GetSettingsScreen().GetSettingTabPanel();
 		settingTabs.AddChild(
 			new SettingTab("ReForge", () => GD.Print("[ReForge.UI] Settings tab clicked."), selected: true)
 				.WithMinHeight(72f)
 		);
-		settingTabs.GetSettingScreen("ReForge")?.Add(
+		settingTabs.GetSettingTab("ReForge")?.Add(
 			SettingOptionItem.Toggle("启用 ReForge 功能", initialValue: true, onToggled: isOn =>
 			{
 				GD.Print($"[ReForge.UI] ReForge setting toggled: {isOn}");
 			})
+			.WithHoverTip("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TIP_TITLE", "REFORGE.SETTINGS.DEBUG_TIP_DESC")
 		);
 	}
 }

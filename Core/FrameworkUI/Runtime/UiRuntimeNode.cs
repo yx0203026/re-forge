@@ -1,7 +1,10 @@
 #nullable enable
 
+using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Godot;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using ReForgeFramework.UI.SystemAreas;
 
@@ -24,13 +27,17 @@ public partial class UiRuntimeNode : Node
 	private const string SettingsTabManagerNodeName = "SettingsTabManager";
 	private const string SettingsTabScrollHostName = "ReForgeSettingTabScrollHost";
 	private const string SettingsTabFadeLayerName = "ReForgeSettingTabFadeLayer";
-	private const string SettingsTabLeftFadeName = "ReForgeSettingTabLeftFade";
-	private const string SettingsTabRightFadeName = "ReForgeSettingTabRightFade";
-	private const int SettingsTabFadeWidth = 84;
-	private static readonly StringName MetaSettingTabWheelBound = "__reforge_setting_tab_wheel_bound";
-	private static readonly Color SettingsTabFadeColor = new(0.05f, 0.08f, 0.12f, 0.96f);
-	private static Texture2D? _settingsTabLeftFadeTexture;
-	private static Texture2D? _settingsTabRightFadeTexture;
+	private const string SettingsTabPrevButtonName = "ReForgeSettingTabPagePrevButton";
+	private const string SettingsTabNextButtonName = "ReForgeSettingTabPageNextButton";
+	private const string SettingsTabPagerArrowScenePath = "res://scenes/screens/run_history_screen/run_history_arrow.tscn";
+	private const int SettingsTabPageSize = 4;
+	private const float SettingsTabPagerButtonWidth = 52f;
+	private const float SettingsTabPagerReservedWidth = 60f;
+	private static readonly StringName MetaSettingTabPagerButtonBound = "__reforge_setting_tab_pager_button_bound";
+	private static readonly StringName MetaSettingTabPagerTabBound = "__reforge_setting_tab_pager_tab_bound";
+	private static readonly StringName MetaSettingTabPagerArrowReadyHookBound = "__reforge_setting_tab_pager_arrow_ready_hook_bound";
+	private static readonly Dictionary<ulong, int> _settingTabCurrentPageByManager = new();
+	private static readonly Dictionary<ulong, Vector2> _settingTabOriginalHorizontalOffsetsByManager = new();
 
 	private static UiRuntimeNode? _instance;
 
@@ -404,7 +411,7 @@ public partial class UiRuntimeNode : Node
 			return null;
 		}
 
-		_ = EnsureSettingTabScrollHost(tabManager);
+		EnsureSettingTabPager(tabManager);
 		return tabManager;
 	}
 
@@ -427,183 +434,311 @@ public partial class UiRuntimeNode : Node
 		return null;
 	}
 
-	private static ScrollContainer EnsureSettingTabScrollHost(Control tabManager)
+	private static void EnsureSettingTabPager(Control tabManager)
 	{
-		if (tabManager.GetParent() is ScrollContainer existingHost && existingHost.Name == SettingsTabScrollHostName)
-		{
-			ConfigureSettingTabScrollHost(existingHost);
-			return existingHost;
-		}
+		DetachLegacySettingTabScrollHost(tabManager);
 
 		if (tabManager.GetParent() is not Control parent)
-		{
-			throw new System.InvalidOperationException("SettingsTabManager parent is not Control.");
-		}
-
-		ScrollContainer scrollHost = new()
-		{
-			Name = SettingsTabScrollHostName
-		};
-
-		CopyLayout(tabManager, scrollHost);
-		ConfigureSettingTabScrollHost(scrollHost);
-
-		int oldIndex = tabManager.GetIndex();
-		parent.AddChild(scrollHost);
-		parent.MoveChild(scrollHost, oldIndex);
-		tabManager.Reparent(scrollHost, keepGlobalTransform: true);
-		tabManager.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-		return scrollHost;
-	}
-
-	private static void ConfigureSettingTabScrollHost(ScrollContainer scrollHost)
-	{
-		scrollHost.HorizontalScrollMode = ScrollContainer.ScrollMode.ShowNever;
-		scrollHost.VerticalScrollMode = ScrollContainer.ScrollMode.ShowNever;
-		scrollHost.MouseFilter = Control.MouseFilterEnum.Stop;
-		EnsureSettingTabEdgeFade(scrollHost);
-
-		if (scrollHost.HasMeta(MetaSettingTabWheelBound))
 		{
 			return;
 		}
 
-		scrollHost.SetMeta(MetaSettingTabWheelBound, true);
-		scrollHost.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(inputEvent =>
-		{
-			if (inputEvent is not InputEventMouseButton mouseButton || !mouseButton.IsPressed())
-			{
-				return;
-			}
+		AdjustSettingTabManagerForPager(tabManager);
 
-			const int step = 96;
-			switch (mouseButton.ButtonIndex)
-			{
-				case MouseButton.WheelUp:
-				case MouseButton.WheelLeft:
-					scrollHost.ScrollHorizontal = Mathf.Max(0, scrollHost.ScrollHorizontal - step);
-					break;
-				case MouseButton.WheelDown:
-				case MouseButton.WheelRight:
-					scrollHost.ScrollHorizontal += step;
-					break;
-			}
-		}));
+		Control prevButton = EnsureSettingTabPagerButton(parent, SettingsTabPrevButtonName, isLeft: true);
+		Control nextButton = EnsureSettingTabPagerButton(parent, SettingsTabNextButtonName, isLeft: false);
+		LayoutSettingTabPagerButtons(tabManager, prevButton, nextButton);
+
+		BindSettingTabPagerButtonPressed(prevButton, () => ChangeSettingTabPage(tabManager, -1));
+		BindSettingTabPagerButtonPressed(nextButton, () => ChangeSettingTabPage(tabManager, +1));
+
+		RefreshSettingTabPagination(tabManager);
 	}
 
-	private static void EnsureSettingTabEdgeFade(ScrollContainer scrollHost)
+	private static void DetachLegacySettingTabScrollHost(Control tabManager)
 	{
+		if (tabManager.GetParent() is not ScrollContainer scrollHost || scrollHost.Name != SettingsTabScrollHostName)
+		{
+			return;
+		}
+
 		if (scrollHost.GetParent() is not Control parent)
 		{
 			return;
 		}
 
-		Control fadeLayer = parent.GetNodeOrNull<Control>(SettingsTabFadeLayerName) ?? CreateSettingTabFadeLayer();
-		CopyLayout(scrollHost, fadeLayer);
-		if (fadeLayer.GetParent() == null)
-		{
-			parent.AddChild(fadeLayer);
-		}
+		int oldIndex = scrollHost.GetIndex();
+		tabManager.Reparent(parent, keepGlobalTransform: true);
+		parent.MoveChild(tabManager, oldIndex);
 
-		// 让遮罩层稳定覆盖在滚动容器上方。
-		parent.MoveChild(fadeLayer, parent.GetChildCount() - 1);
-
-		TextureRect leftFade = fadeLayer.GetNodeOrNull<TextureRect>(SettingsTabLeftFadeName) ?? CreateSettingTabFadeOverlay(leftSide: true);
-		if (leftFade.GetParent() == null)
-		{
-			fadeLayer.AddChild(leftFade);
-		}
-
-		TextureRect rightFade = fadeLayer.GetNodeOrNull<TextureRect>(SettingsTabRightFadeName) ?? CreateSettingTabFadeOverlay(leftSide: false);
-		if (rightFade.GetParent() == null)
-		{
-			fadeLayer.AddChild(rightFade);
-		}
-
-		fadeLayer.MoveChild(leftFade, fadeLayer.GetChildCount() - 1);
-		fadeLayer.MoveChild(rightFade, fadeLayer.GetChildCount() - 1);
+		Control? fadeLayer = parent.GetNodeOrNull<Control>(SettingsTabFadeLayerName);
+		fadeLayer?.QueueFree();
+		scrollHost.QueueFree();
 	}
 
-	private static Control CreateSettingTabFadeLayer()
+	private static void AdjustSettingTabManagerForPager(Control tabManager)
 	{
-		return new Control
+		ulong managerId = tabManager.GetInstanceId();
+		if (!_settingTabOriginalHorizontalOffsetsByManager.ContainsKey(managerId))
 		{
-			Name = SettingsTabFadeLayerName,
-			MouseFilter = Control.MouseFilterEnum.Ignore,
-			ZIndex = 300
-		};
-	}
-
-	private static TextureRect CreateSettingTabFadeOverlay(bool leftSide)
-	{
-		TextureRect fade = new()
-		{
-			Name = leftSide ? SettingsTabLeftFadeName : SettingsTabRightFadeName,
-			MouseFilter = Control.MouseFilterEnum.Ignore,
-			Texture = GetSettingTabFadeTexture(leftSide),
-			StretchMode = TextureRect.StretchModeEnum.Scale,
-			ZIndex = 200
-		};
-
-		fade.AnchorTop = 0;
-		fade.AnchorBottom = 1;
-		fade.OffsetTop = 0;
-		fade.OffsetBottom = 0;
-
-		if (leftSide)
-		{
-			fade.AnchorLeft = 0;
-			fade.AnchorRight = 0;
-			fade.OffsetLeft = 0;
-			fade.OffsetRight = SettingsTabFadeWidth;
-		}
-		else
-		{
-			fade.AnchorLeft = 1;
-			fade.AnchorRight = 1;
-			fade.OffsetLeft = -SettingsTabFadeWidth;
-			fade.OffsetRight = 0;
+			_settingTabOriginalHorizontalOffsetsByManager[managerId] = new Vector2(tabManager.OffsetLeft, tabManager.OffsetRight);
 		}
 
-		return fade;
+		Vector2 originalOffsets = _settingTabOriginalHorizontalOffsetsByManager[managerId];
+		tabManager.OffsetLeft = originalOffsets.X + SettingsTabPagerReservedWidth;
+		tabManager.OffsetRight = originalOffsets.Y - SettingsTabPagerReservedWidth;
 	}
 
-	private static Texture2D GetSettingTabFadeTexture(bool leftSide)
+	private static Control EnsureSettingTabPagerButton(Control parent, string name, bool isLeft)
 	{
-		if (leftSide)
+		Control button = parent.GetNodeOrNull<Control>(name) ?? CreateSettingTabPagerButton(isLeft);
+		button.Name = name;
+		button.FocusMode = Control.FocusModeEnum.All;
+		button.MouseFilter = Control.MouseFilterEnum.Stop;
+		button.ZIndex = 310;
+
+		if (button is Button fallback)
 		{
-			_settingsTabLeftFadeTexture ??= BuildFadeTexture(leftToRight: true);
-			return _settingsTabLeftFadeTexture;
+			fallback.Text = isLeft ? "<" : ">";
 		}
 
-		_settingsTabRightFadeTexture ??= BuildFadeTexture(leftToRight: false);
-		return _settingsTabRightFadeTexture;
+		TrySetArrowDirection(button, isLeft);
+
+		if (button.GetParent() == null)
+		{
+			parent.AddChild(button);
+		}
+
+		return button;
 	}
 
-	private static Texture2D BuildFadeTexture(bool leftToRight)
+	private static Control CreateSettingTabPagerButton(bool isLeft)
 	{
-		const int width = 128;
-		const int height = 4;
-		Image image = Image.CreateEmpty(width, height, false, Image.Format.Rgba8);
-
-		for (int x = 0; x < width; x++)
+		if (ResourceLoader.Exists(SettingsTabPagerArrowScenePath))
 		{
-			float t = (float)x / (width - 1);
-			float alpha = leftToRight ? 1f - t : t;
-			Color color = new(SettingsTabFadeColor.R, SettingsTabFadeColor.G, SettingsTabFadeColor.B, SettingsTabFadeColor.A * alpha);
-			for (int y = 0; y < height; y++)
+			PackedScene? scene = ResourceLoader.Load<PackedScene>(SettingsTabPagerArrowScenePath);
+			if (scene?.Instantiate() is Control officialArrow)
 			{
-				image.SetPixel(x, y, color);
+				TrySetArrowDirection(officialArrow, isLeft);
+				return officialArrow;
 			}
 		}
 
-		return ImageTexture.CreateFromImage(image);
+		return new Button
+		{
+			Text = isLeft ? "<" : ">"
+		};
+	}
+
+	private static void TrySetArrowDirection(Control button, bool isLeft)
+	{
+		PropertyInfo? prop = button.GetType().GetProperty("IsLeft", BindingFlags.Instance | BindingFlags.Public);
+		if (prop?.CanWrite == true && prop.PropertyType == typeof(bool))
+		{
+			if (button.IsNodeReady())
+			{
+				prop.SetValue(button, isLeft);
+				return;
+			}
+
+			if (!button.HasMeta(MetaSettingTabPagerArrowReadyHookBound))
+			{
+				button.SetMeta(MetaSettingTabPagerArrowReadyHookBound, true);
+				button.Connect(Node.SignalName.Ready, Callable.From(() =>
+				{
+					if (!GodotObject.IsInstanceValid(button))
+					{
+						return;
+					}
+
+					PropertyInfo? lateProp = button.GetType().GetProperty("IsLeft", BindingFlags.Instance | BindingFlags.Public);
+					if (lateProp?.CanWrite == true && lateProp.PropertyType == typeof(bool))
+					{
+						lateProp.SetValue(button, isLeft);
+					}
+				}), (uint)GodotObject.ConnectFlags.OneShot);
+			}
+
+			return;
+		}
+
+		if (button.GetNodeOrNull<TextureRect>("TextureRect") is TextureRect icon)
+		{
+			icon.FlipH = !isLeft;
+		}
+	}
+
+	private static void BindSettingTabPagerButtonPressed(Control button, Action handler)
+	{
+		if (button.HasMeta(MetaSettingTabPagerButtonBound))
+		{
+			return;
+		}
+
+		button.SetMeta(MetaSettingTabPagerButtonBound, true);
+
+		if (button is Button fallback)
+		{
+			fallback.Pressed += handler;
+			return;
+		}
+
+		if (button.HasSignal(NClickableControl.SignalName.Released))
+		{
+			button.Connect(NClickableControl.SignalName.Released, Callable.From<GodotObject>(_ => handler()));
+		}
+	}
+
+	private static void LayoutSettingTabPagerButtons(Control tabManager, Control prevButton, Control nextButton)
+	{
+		ulong managerId = tabManager.GetInstanceId();
+		if (!_settingTabOriginalHorizontalOffsetsByManager.TryGetValue(managerId, out Vector2 originalOffsets))
+		{
+			originalOffsets = new Vector2(tabManager.OffsetLeft - SettingsTabPagerReservedWidth, tabManager.OffsetRight + SettingsTabPagerReservedWidth);
+		}
+
+		ApplyPagerButtonVerticalLayout(tabManager, prevButton);
+		prevButton.AnchorLeft = tabManager.AnchorLeft;
+		prevButton.AnchorRight = tabManager.AnchorLeft;
+		prevButton.OffsetLeft = originalOffsets.X;
+		prevButton.OffsetRight = originalOffsets.X + SettingsTabPagerButtonWidth;
+
+		ApplyPagerButtonVerticalLayout(tabManager, nextButton);
+		nextButton.AnchorLeft = tabManager.AnchorRight;
+		nextButton.AnchorRight = tabManager.AnchorRight;
+		nextButton.OffsetLeft = originalOffsets.Y - SettingsTabPagerButtonWidth;
+		nextButton.OffsetRight = originalOffsets.Y;
+	}
+
+	private static void ApplyPagerButtonVerticalLayout(Control tabManager, Control button)
+	{
+		button.AnchorTop = tabManager.AnchorTop;
+		button.AnchorBottom = tabManager.AnchorBottom;
+		button.OffsetTop = tabManager.OffsetTop;
+		button.OffsetBottom = tabManager.OffsetBottom;
+	}
+
+	private static void ChangeSettingTabPage(Control tabManager, int delta)
+	{
+		if (!GodotObject.IsInstanceValid(tabManager))
+		{
+			return;
+		}
+
+		ulong managerId = tabManager.GetInstanceId();
+		int currentPage = _settingTabCurrentPageByManager.TryGetValue(managerId, out int existingPage) ? existingPage : 0;
+		_settingTabCurrentPageByManager[managerId] = currentPage + delta;
+		RefreshSettingTabPagination(tabManager);
+	}
+
+	private static void RefreshSettingTabPagination(Control tabManager)
+	{
+		List<NSettingsTab> tabs = CollectDirectSettingTabs(tabManager);
+		BindSettingTabPagerSignals(tabManager, tabs);
+
+		int totalPages = Mathf.Max(1, Mathf.CeilToInt(tabs.Count / (float)SettingsTabPageSize));
+		ulong managerId = tabManager.GetInstanceId();
+		int currentPage = _settingTabCurrentPageByManager.TryGetValue(managerId, out int existingPage) ? existingPage : 0;
+		currentPage = Mathf.Clamp(currentPage, 0, totalPages - 1);
+		_settingTabCurrentPageByManager[managerId] = currentPage;
+
+		int pageStart = currentPage * SettingsTabPageSize;
+		int pageEndExclusive = pageStart + SettingsTabPageSize;
+		for (int i = 0; i < tabs.Count; i++)
+		{
+			tabs[i].Visible = i >= pageStart && i < pageEndExclusive;
+		}
+
+		if (tabManager.GetParent() is not Control parent)
+		{
+			return;
+		}
+
+		Control? prevButton = parent.GetNodeOrNull<Control>(SettingsTabPrevButtonName);
+		if (prevButton != null)
+		{
+			SetPagerButtonDisabled(prevButton, currentPage <= 0);
+		}
+
+		Control? nextButton = parent.GetNodeOrNull<Control>(SettingsTabNextButtonName);
+		if (nextButton != null)
+		{
+			SetPagerButtonDisabled(nextButton, currentPage >= totalPages - 1);
+		}
+	}
+
+	private static void SetPagerButtonDisabled(Control button, bool disabled)
+	{
+		if (button is NClickableControl clickable)
+		{
+			if (disabled)
+			{
+				clickable.Disable();
+			}
+			else
+			{
+				clickable.Enable();
+			}
+			return;
+		}
+
+		if (button is BaseButton baseButton)
+		{
+			baseButton.Disabled = disabled;
+		}
+	}
+
+	private static List<NSettingsTab> CollectDirectSettingTabs(Control tabManager)
+	{
+		List<NSettingsTab> tabs = new();
+		foreach (Node child in tabManager.GetChildren())
+		{
+			if (child is NSettingsTab tab)
+			{
+				tabs.Add(tab);
+			}
+		}
+
+		return tabs;
+	}
+
+	private static void BindSettingTabPagerSignals(Control tabManager, List<NSettingsTab> tabs)
+	{
+		for (int i = 0; i < tabs.Count; i++)
+		{
+			NSettingsTab tab = tabs[i];
+			if (tab.HasMeta(MetaSettingTabPagerTabBound))
+			{
+				continue;
+			}
+
+			tab.SetMeta(MetaSettingTabPagerTabBound, true);
+			tab.Connect(NClickableControl.SignalName.Released, Callable.From<GodotObject>(_ =>
+			{
+				if (!GodotObject.IsInstanceValid(tabManager) || !GodotObject.IsInstanceValid(tab))
+				{
+					return;
+				}
+
+				List<NSettingsTab> latestTabs = CollectDirectSettingTabs(tabManager);
+				int clickedTabIndex = latestTabs.IndexOf(tab);
+				if (clickedTabIndex < 0)
+				{
+					return;
+				}
+
+				ulong managerId = tabManager.GetInstanceId();
+				_settingTabCurrentPageByManager[managerId] = clickedTabIndex / SettingsTabPageSize;
+				RefreshSettingTabPagination(tabManager);
+			}));
+		}
 	}
 
 	private static void AttachSettingTab(Control tabManager, Control child)
 	{
 		if (child.GetParent() == tabManager)
 		{
+			EnsureSettingTabPager(tabManager);
 			return;
 		}
 
@@ -621,6 +756,8 @@ public partial class UiRuntimeNode : Node
 		{
 			tabManager.MoveChild(child, rightTriggerIndex);
 		}
+
+		EnsureSettingTabPager(tabManager);
 	}
 
 	private static int FindDirectChildIndexByName(Node parent, string childName)

@@ -6,7 +6,7 @@ using ReForgeFramework.UI.Runtime;
 
 namespace ReForgeFramework.UI.SystemAreas;
 
-public sealed class SystemUiAreaHost
+public class SystemUiAreaHost
 {
 	private readonly SystemUiArea _area;
 	private readonly List<IUiElement> _elements = new();

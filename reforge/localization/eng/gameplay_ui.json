@@ -4,6 +4,10 @@
   "REFORGE.UI.MAIN_MENU_BUTTON": "ReForge",
   "REFORGE.SETTINGS.TAB": "ReForge",
   "REFORGE.SETTINGS.DEBUG_TITLE": "Enable Debug Console",
+  "REFORGE.SETTINGS.FEEDBACK_TITLE": "Feedback",
+  "REFORGE.SETTINGS.FEEDBACK_BUTTON": "Feedback",
   "REFORGE.SETTINGS.DEBUG_TIP_TITLE": "Debug Console",
-  "REFORGE.SETTINGS.DEBUG_TIP_DESC": "When enabled, ReForge opens a C# debug console right after mod initialization completes."
+  "REFORGE.SETTINGS.DEBUG_TIP_DESC": "When enabled, ReForge opens a C# debug console right after mod initialization completes.",
+  "REFORGE.SETTINGS.FEEDBACK_TIP_TITLE": "Feedback",
+  "REFORGE.SETTINGS.FEEDBACK_TIP_DESC": "Open the ReForge GitHub repository to submit feedback or issues."
 }
