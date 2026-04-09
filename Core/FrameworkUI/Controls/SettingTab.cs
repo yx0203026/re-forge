@@ -24,6 +24,13 @@ public sealed partial class SettingTab : UiElement
 	private readonly List<IUiElement> _entries = new();
 	private VBoxContainer? _content;
 
+	/// <summary>
+	/// 初始化设置页标签。
+	/// </summary>
+	/// <param name="text">标签文本。</param>
+	/// <param name="onClick">点击回调。</param>
+	/// <param name="selected">是否默认选中。</param>
+	/// <param name="screenKey">设置页唯一键；为空时使用文本。</param>
 	public SettingTab(string text, Action? onClick = null, bool selected = false, string? screenKey = null)
 	{
 		_text = text;
@@ -32,10 +39,21 @@ public sealed partial class SettingTab : UiElement
 		ScreenKey = string.IsNullOrWhiteSpace(screenKey) ? text : screenKey;
 	}
 
+	/// <summary>
+	/// 设置页唯一键，用于查找与路由。
+	/// </summary>
 	public string ScreenKey { get; }
 
+	/// <summary>
+	/// 当前标签是否默认选中。
+	/// </summary>
 	public bool SelectedByDefault => _selected;
 
+	/// <summary>
+	/// 添加一个设置项控件。
+	/// </summary>
+	/// <param name="entry">待添加控件。</param>
+	/// <returns>当前标签实例。</returns>
 	public SettingTab Add(IUiElement entry)
 	{
 		if (entry is SettingOptionItem settingOptionItem && !settingOptionItem.HasHoverTip)
@@ -104,42 +122,78 @@ public sealed partial class SettingTab : UiElement
 		return Add(item);
 	}
 
+	/// <summary>
+	/// 设置标签高度。
+	/// </summary>
+	/// <param name="height">目标高度。</param>
+	/// <returns>当前标签实例。</returns>
 	public new SettingTab WithHeight(float height)
 	{
 		base.WithHeight(height);
 		return this;
 	}
 
+	/// <summary>
+	/// 设置标签最小高度。
+	/// </summary>
+	/// <param name="minHeight">最小高度。</param>
+	/// <returns>当前标签实例。</returns>
 	public new SettingTab WithMinHeight(float minHeight)
 	{
 		base.WithMinHeight(minHeight);
 		return this;
 	}
 
+	/// <summary>
+	/// 设置标签最大高度。
+	/// </summary>
+	/// <param name="maxHeight">最大高度。</param>
+	/// <returns>当前标签实例。</returns>
 	public new SettingTab WithMaxHeight(float maxHeight)
 	{
 		base.WithMaxHeight(maxHeight);
 		return this;
 	}
 
+	/// <summary>
+	/// 设置标签锚点预设。
+	/// </summary>
+	/// <param name="preset">锚点预设。</param>
+	/// <returns>当前标签实例。</returns>
 	public new SettingTab WithAnchor(UiAnchorPreset preset)
 	{
 		base.WithAnchor(preset);
 		return this;
 	}
 
+	/// <summary>
+	/// 设置标签偏移量。
+	/// </summary>
+	/// <param name="x">X 方向偏移。</param>
+	/// <param name="y">Y 方向偏移。</param>
+	/// <returns>当前标签实例。</returns>
 	public new SettingTab WithPositionOffset(float x, float y)
 	{
 		base.WithPositionOffset(x, y);
 		return this;
 	}
 
+	/// <summary>
+	/// 设置标签偏移向量。
+	/// </summary>
+	/// <param name="offset">偏移向量。</param>
+	/// <returns>当前标签实例。</returns>
 	public new SettingTab WithPositionOffset(Vector2 offset)
 	{
 		base.WithPositionOffset(offset);
 		return this;
 	}
 
+	/// <summary>
+	/// 更新标签显示文本。
+	/// </summary>
+	/// <param name="text">新文本。</param>
+	/// <returns>当前标签实例。</returns>
 	public SettingTab WithText(string text)
 	{
 		_text = text;
@@ -150,6 +204,11 @@ public sealed partial class SettingTab : UiElement
 		return this;
 	}
 
+	/// <summary>
+	/// 设置标签是否选中。
+	/// </summary>
+	/// <param name="selected">是否选中。</param>
+	/// <returns>当前标签实例。</returns>
 	public SettingTab WithSelected(bool selected = true)
 	{
 		_selected = selected;

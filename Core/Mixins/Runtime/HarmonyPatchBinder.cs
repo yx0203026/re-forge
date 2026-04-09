@@ -10,30 +10,82 @@ using HarmonyLib;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
+/// <summary>
+/// 补丁应用record：记录单次补丁应用的详细信息。
+/// </summary>
 public sealed record MixinPatchApplyRecord(
+	/// <summary>注入描述符键。</summary>
 	string InjectionDescriptorKey,
+
+	/// <summary>注入类型。</summary>
 	InjectionKind Kind,
+
+	/// <summary>冲突检测键。</summary>
 	string ConflictKey,
+
+	/// <summary>目标类型名称。</summary>
 	string TargetTypeName,
+
+	/// <summary>目标方法名称。</summary>
 	string TargetMethodName,
+
+	/// <summary>补丁是否成功应用。</summary>
 	bool Success,
+
+	/// <summary>应用结果说明。</summary>
 	string Message,
+
+	/// <summary>冲突发生时的处理策略（若有）。</summary>
 	MixinConflictResolution? ConflictResolution,
+
+	/// <summary>修补后的目标方法。</summary>
 	MethodBase? PatchedTarget,
+
+	/// <summary>实际应用的补丁方法。</summary>
 	MethodInfo? AppliedPatchMethod
 );
 
+/// <summary>
+/// Shadow 字段绑定 record：记录单条字段绑定的结果。
+/// </summary>
 public sealed record ShadowBindRecord(
+	/// <summary>Shadow 描述符键。</summary>
 	string ShadowDescriptorKey,
+
+	/// <summary>Mixin 中的字段成员名。</summary>
 	string MixinMemberName,
+
+	/// <summary>目标类型中找到的字段名。</summary>
 	string TargetMemberName,
+
+	/// <summary>绑定是否成功。</summary>
 	bool Success,
+
+	/// <summary>是否为可选字段（不存在时允许跳过）。</summary>
 	bool Optional,
+
+	/// <summary>绑定结果说明。</summary>
 	string Message
 );
 
+/// <summary>
+/// 单个 Mixin 的补丁绑定与应用结果。
+/// </summary>
 public sealed class MixinPatchBindResult
 {
+	/// <summary>
+	/// 初始化 <see cref="MixinPatchBindResult"/> 的新实例。
+	/// </summary>
+	/// <param name="mixinId">Mixin 标识符。</param>
+	/// <param name="installed">成功安装的补丁数。</param>
+	/// <param name="failed">安装失败的补丁数。</param>
+	/// <param name="skipped">被跳过的补丁数。</param>
+	/// <param name="abortedByStrictMode">是否因严格模式中止。</param>
+	/// <param name="records">补丁应用记录列表。</param>
+	/// <param name="shadowInstalled">成功绑定的 Shadow 字段数（可选）。</param>
+	/// <param name="shadowFailed">绑定失败的 Shadow 字段数（可选）。</param>
+	/// <param name="shadowSkipped">被跳过的 Shadow 字段数（可选）。</param>
+	/// <param name="shadowRecords">Shadow 绑定记录列表（可选）。</param>
 	public MixinPatchBindResult(
 		string mixinId,
 		int installed,
@@ -61,33 +113,79 @@ public sealed class MixinPatchBindResult
 		ShadowRecords = shadowRecords ?? Array.Empty<ShadowBindRecord>();
 	}
 
+	/// <summary>
+	/// 获取 Mixin 标识符。
+	/// </summary>
 	public string MixinId { get; }
 
+	/// <summary>
+	/// 获取成功安装的补丁数。
+	/// </summary>
 	public int Installed { get; }
 
+	/// <summary>
+	/// 获取安装失败的补丁数。
+	/// </summary>
 	public int Failed { get; }
 
+	/// <summary>
+	/// 获取被跳过的补丁数。
+	/// </summary>
 	public int Skipped { get; }
 
+	/// <summary>
+	/// 获取是否因严格模式违规而中止。
+	/// </summary>
 	public bool AbortedByStrictMode { get; }
 
+	/// <summary>
+	/// 获取补丁应用详细记录列表。
+	/// </summary>
 	public IReadOnlyList<MixinPatchApplyRecord> Records { get; }
 
+	/// <summary>
+	/// 获取成功绑定的 Shadow 字段数。
+	/// </summary>
 	public int ShadowInstalled { get; }
 
+	/// <summary>
+	/// 获取绑定失败的 Shadow 字段数。
+	/// </summary>
 	public int ShadowFailed { get; }
 
+	/// <summary>
+	/// 获取被跳过的 Shadow 字段数。
+	/// </summary>
 	public int ShadowSkipped { get; }
 
+	/// <summary>
+	/// 获取 Shadow 字段绑定详细记录列表。
+	/// </summary>
 	public IReadOnlyList<ShadowBindRecord> ShadowRecords { get; }
 }
 
+/// <summary>
+/// Harmony 补丁绑定器：负责将 Mixin 描述符中的注入转换为 Harmony 补丁并应用。
+/// </summary>
+/// <remarks>
+/// 此类是 Mixin 系统与 Harmony 库之间的适配层，执行以下职责：
+/// • 验证目标方法是否存在且可访问
+/// • 将注入描述符转换为 Harmony 补丁
+/// • 应用补丁并处理冲突
+/// • 跟踪已应用补丁以供后续卸载
+/// • 绑定 Shadow 字段映射
+/// </remarks>
 internal sealed class HarmonyPatchBinder
 {
 	private readonly HarmonyTargetResolver _targetResolver = new();
 	private readonly MixinConflictPolicy _conflictPolicy;
 	private readonly MixinAppliedRegistry _appliedRegistry;
 
+	/// <summary>
+	/// 初始化 <see cref="HarmonyPatchBinder"/> 的新实例。
+	/// </summary>
+	/// <param name="conflictPolicy">冲突处理策略（可选，使用默认策略）。</param>
+	/// <param name="appliedRegistry">已应用补丁追踪注册表（可选，创建新实例）。</param>
 	public HarmonyPatchBinder(
 		MixinConflictPolicy? conflictPolicy = null,
 		MixinAppliedRegistry? appliedRegistry = null)
@@ -96,6 +194,13 @@ internal sealed class HarmonyPatchBinder
 		_appliedRegistry = appliedRegistry ?? new MixinAppliedRegistry();
 	}
 
+	/// <summary>
+	/// 绑定并应用单个 Mixin 的所有补丁。
+	/// </summary>
+	/// <param name="descriptor">Mixin 描述符。</param>
+	/// <param name="harmony">Harmony 实例，用于应用补丁。</param>
+	/// <returns>包含绑定结果与统计信息的 <see cref="MixinPatchBindResult"/> 对象。</returns>
+	/// <exception cref="ArgumentNullException">当任何参数为 null 时。</exception>
 	public MixinPatchBindResult BindAndApply(MixinDescriptor descriptor, Harmony harmony)
 	{
 		ArgumentNullException.ThrowIfNull(descriptor);

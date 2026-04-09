@@ -36,8 +36,14 @@ public static class UiLocalization
 	private static string _currentLocale = DefaultLocale;
 	private static bool _officialHooked;
 
+	/// <summary>
+	/// 语言切换事件。
+	/// </summary>
 	public static event Action? LocaleChanged;
 
+	/// <summary>
+	/// 当前语言代码。
+	/// </summary>
 	public static string CurrentLocale
 	{
 		get
@@ -47,6 +53,11 @@ public static class UiLocalization
 		}
 	}
 
+	/// <summary>
+	/// 注册某个语言的词条集合。
+	/// </summary>
+	/// <param name="locale">语言代码。</param>
+	/// <param name="entries">词条集合。</param>
 	public static void RegisterLocale(string locale, IReadOnlyDictionary<string, string> entries)
 	{
 		if (string.IsNullOrWhiteSpace(locale) || entries.Count == 0)
@@ -73,6 +84,10 @@ public static class UiLocalization
 		}
 	}
 
+	/// <summary>
+	/// 切换当前语言。
+	/// </summary>
+	/// <param name="locale">目标语言代码。</param>
 	public static void SetLocale(string locale)
 	{
 		if (string.IsNullOrWhiteSpace(locale))
@@ -95,6 +110,14 @@ public static class UiLocalization
 		LocaleChanged?.Invoke();
 	}
 
+	/// <summary>
+	/// 查询本地化文本。
+	/// </summary>
+	/// <param name="key">UI 本地化 key（可选）。</param>
+	/// <param name="fallbackText">未命中时的回退文本。</param>
+	/// <param name="locTable">官方本地化表名（可选）。</param>
+	/// <param name="locEntryKey">官方本地化词条键（可选）。</param>
+	/// <returns>解析后的文本。</returns>
 	public static string GetText(string? key, string? fallbackText = null, string? locTable = null, string? locEntryKey = null)
 	{
 		EnsureOfficialBridge();

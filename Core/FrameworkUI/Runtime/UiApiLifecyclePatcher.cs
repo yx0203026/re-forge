@@ -22,6 +22,10 @@ internal static class UiApiLifecyclePatcher
 	private static bool _nodeAddedHooked;
 	private static bool _reinjectQueued;
 
+	/// <summary>
+	/// 确保生命周期补丁已应用，并注册门面实例以接收后续重注入通知。
+	/// </summary>
+	/// <param name="facade">门面实例。</param>
 	public static void EnsurePatched(ReForgeUiFacade facade)
 	{
 		UiRuntimeNode.Ensure();

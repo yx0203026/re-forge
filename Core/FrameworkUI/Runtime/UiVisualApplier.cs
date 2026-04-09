@@ -14,6 +14,11 @@ internal static class UiVisualApplier
 	private static readonly StringName MetaCenterPivotBound = "__reforge_center_pivot_bound";
 	private static readonly StringName MetaVisibilityScope = "__reforge_visibility_scope";
 
+	/// <summary>
+	/// 将视觉配置应用到控件。
+	/// </summary>
+	/// <param name="control">目标控件。</param>
+	/// <param name="options">视觉配置。</param>
 	public static void Apply(Control control, UiVisualOptions options)
 	{
 		if (options.Scale.HasValue)

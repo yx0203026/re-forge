@@ -16,6 +16,9 @@ using ReForgeFramework.UI.SystemAreas;
 
 namespace ReForgeFramework.UI.Runtime;
 
+/// <summary>
+/// UI 运行时节点，负责系统区域挂载、延迟重试与可见性作用域更新。
+/// </summary>
 public partial class UiRuntimeNode : Node
 {
 	private sealed record PendingMount(SystemUiArea Area, Control Node);
@@ -59,6 +62,10 @@ public partial class UiRuntimeNode : Node
 	private CanvasLayer? _globalLayer;
 	private Control? _globalRoot;
 
+	/// <summary>
+	/// 获取或创建运行时单例节点。
+	/// </summary>
+	/// <returns>运行时节点实例。</returns>
 	public static UiRuntimeNode Ensure()
 	{
 		if (GodotObject.IsInstanceValid(_instance))
@@ -90,12 +97,19 @@ public partial class UiRuntimeNode : Node
 		return _instance;
 	}
 
+	/// <summary>
+	/// 节点入树时调度待挂载队列刷新。
+	/// </summary>
 	public override void _EnterTree()
 	{
 		_attachScheduled = false;
 		SchedulePendingFlush();
 	}
 
+	/// <summary>
+	/// 每帧刷新作用域可见性并处理挂载重试。
+	/// </summary>
+	/// <param name="delta">帧间隔秒数。</param>
 	public override void _Process(double delta)
 	{
 		RefreshScopedVisibilityControls();
@@ -116,6 +130,10 @@ public partial class UiRuntimeNode : Node
 		FlushPendingMounts();
 	}
 
+	/// <summary>
+	/// 挂载控件到全局 UI 层。
+	/// </summary>
+	/// <param name="node">目标控件。</param>
 	public void MountGlobal(Control node)
 	{
 		if (!GodotObject.IsInstanceValid(node))
@@ -133,6 +151,11 @@ public partial class UiRuntimeNode : Node
 		TrackScopedVisibilityIfNeeded(node);
 	}
 
+	/// <summary>
+	/// 挂载控件到指定系统区域，不可用时进入延迟队列。
+	/// </summary>
+	/// <param name="area">目标系统区域。</param>
+	/// <param name="node">目标控件。</param>
 	public void MountToArea(SystemUiArea area, Control node)
 	{
 		if (!GodotObject.IsInstanceValid(node))

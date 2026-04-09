@@ -23,16 +23,31 @@ public sealed class SettingOptionItem : UiElement
 	private readonly string _title;
 	private readonly IUiElement _optionControl;
 
+	/// <summary>
+	/// 是否已配置悬浮提示。
+	/// </summary>
 	public bool HasHoverTip { get; private set; }
 
 	internal string Title => _title;
 
+	/// <summary>
+	/// 初始化设置项（左侧标题 + 右侧控件）。
+	/// </summary>
+	/// <param name="title">标题文本。</param>
+	/// <param name="optionControl">右侧选项控件。</param>
 	public SettingOptionItem(string title, IUiElement optionControl)
 	{
 		_title = title;
 		_optionControl = optionControl;
 	}
 
+	/// <summary>
+	/// 创建“标题 + 勾选框”的设置项。
+	/// </summary>
+	/// <param name="title">标题文本。</param>
+	/// <param name="initialValue">初始勾选状态。</param>
+	/// <param name="onToggled">状态变化回调。</param>
+	/// <returns>设置项实例。</returns>
 	public static SettingOptionItem Toggle(string title, bool initialValue, System.Action<bool>? onToggled = null)
 	{
 		return new SettingOptionItem(title, new TickBox(initialValue, onToggled));
@@ -171,6 +186,14 @@ public sealed class SettingOptionItem : UiElement
 		private readonly string? _locEntryKey;
 		private ulong _lastPressInvokeAtMs;
 
+		/// <summary>
+		/// 初始化官方反馈按钮封装。
+		/// </summary>
+		/// <param name="text">默认显示文本。</param>
+		/// <param name="onPressed">点击回调。</param>
+		/// <param name="textKey">UI 本地化 key。</param>
+		/// <param name="locTable">官方本地化表名。</param>
+		/// <param name="locEntryKey">官方本地化词条键。</param>
 		public OfficialFeedbackButton(
 			string text,
 			Action? onPressed = null,

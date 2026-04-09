@@ -7,6 +7,9 @@ using ReForgeFramework.UI.Abstractions;
 
 namespace ReForgeFramework.UI.Panels;
 
+/// <summary>
+/// 网格面板，支持按顺序或按指定行列插入子元素。
+/// </summary>
 public class GridPanel : UiPanel
 {
 	private sealed record GridEntry(IUiElement Element, int? SlotIndex);
@@ -18,6 +21,12 @@ public class GridPanel : UiPanel
 	private readonly int _vSeparation;
 	private readonly List<GridEntry> _entries = new();
 
+	/// <summary>
+	/// 初始化网格面板。
+	/// </summary>
+	/// <param name="columns">列数。</param>
+	/// <param name="hSeparation">水平间距。</param>
+	/// <param name="vSeparation">垂直间距。</param>
 	public GridPanel(int columns, int hSeparation = 8, int vSeparation = 8)
 	{
 		if (columns <= 0)
@@ -30,6 +39,11 @@ public class GridPanel : UiPanel
 		_vSeparation = vSeparation;
 	}
 
+	/// <summary>
+	/// 按顺序添加子元素。
+	/// </summary>
+	/// <param name="child">子元素。</param>
+	/// <returns>当前面板实例。</returns>
 	public override UiPanel AddChild(IUiElement child)
 	{
 		_entries.Add(new GridEntry(child, null));
@@ -38,6 +52,13 @@ public class GridPanel : UiPanel
 		return this;
 	}
 
+	/// <summary>
+	/// 将子元素插入到指定行列位置。
+	/// </summary>
+	/// <param name="child">子元素。</param>
+	/// <param name="row">行索引。</param>
+	/// <param name="column">列索引。</param>
+	/// <returns>当前面板实例。</returns>
 	public GridPanel AddChildAt(IUiElement child, int row, int column)
 	{
 		if (row < 0)

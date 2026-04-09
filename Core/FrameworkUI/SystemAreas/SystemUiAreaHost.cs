@@ -6,6 +6,9 @@ using ReForgeFramework.UI.Runtime;
 
 namespace ReForgeFramework.UI.SystemAreas;
 
+/// <summary>
+/// 系统 UI 区域宿主，负责缓存元素并执行区域挂载。
+/// </summary>
 public class SystemUiAreaHost
 {
 	private readonly SystemUiArea _area;
@@ -16,6 +19,10 @@ public class SystemUiAreaHost
 		_area = area;
 	}
 
+	/// <summary>
+	/// 向当前系统区域添加元素并立即尝试挂载。
+	/// </summary>
+	/// <param name="element">待添加元素。</param>
 	public void AddChild(IUiElement element)
 	{
 		ArgumentNullException.ThrowIfNull(element);

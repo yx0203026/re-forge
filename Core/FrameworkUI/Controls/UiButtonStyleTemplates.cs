@@ -29,6 +29,11 @@ internal static class UiButtonStyleTemplates
 	private static readonly Color SettingsOptionPressedColor = StsColors.lightGray;
 	private static readonly Color SettingsArrowColor = new Color("e0b12a");
 
+	/// <summary>
+	/// 应用指定按钮样式预设。
+	/// </summary>
+	/// <param name="button">目标按钮。</param>
+	/// <param name="preset">样式预设。</param>
 	public static void Apply(Godot.Button button, UiButtonStylePreset preset)
 	{
 		switch (preset)

@@ -20,11 +20,20 @@ internal static class UiLayoutApplier
 	private static readonly StringName MetaMargin = "__reforge_layout_margin";
 	private static readonly StringName MetaAppliedMargin = "__reforge_layout_applied_margin";
 
+	/// <summary>
+	/// 应用布局配置并写入元数据。
+	/// </summary>
+	/// <param name="control">目标控件。</param>
+	/// <param name="options">布局配置。</param>
 	public static void Apply(Control control, UiLayoutOptions? options)
 	{
 		ApplyInternal(control, options, persistMetadata: true);
 	}
 
+	/// <summary>
+	/// 从控件元数据回放布局配置。
+	/// </summary>
+	/// <param name="control">目标控件。</param>
 	public static void ReapplyFromMetadata(Control control)
 	{
 		if (!control.HasMeta(MetaHeight)

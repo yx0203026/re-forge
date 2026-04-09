@@ -10,6 +10,12 @@ namespace ReForgeFramework.UI.Runtime;
 /// </summary>
 internal static class UiLayoutValidator
 {
+	/// <summary>
+	/// 校验并归一化布局参数。
+	/// </summary>
+	/// <param name="options">原始布局配置。</param>
+	/// <param name="controlName">控件名称（用于日志）。</param>
+	/// <returns>归一化后的布局配置。</returns>
 	public static UiLayoutOptions Normalize(UiLayoutOptions? options, string controlName)
 	{
 		if (options == null)

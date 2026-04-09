@@ -19,12 +19,22 @@ public sealed partial class TickBox : UiElement
 	private bool _checked;
 	private readonly Action<bool>? _onToggled;
 
+	/// <summary>
+	/// 初始化勾选框控件。
+	/// </summary>
+	/// <param name="initialChecked">初始勾选状态。</param>
+	/// <param name="onToggled">状态变化回调。</param>
 	public TickBox(bool initialChecked = false, Action<bool>? onToggled = null)
 	{
 		_checked = initialChecked;
 		_onToggled = onToggled;
 	}
 
+	/// <summary>
+	/// 设置勾选框状态。
+	/// </summary>
+	/// <param name="isChecked">目标状态。</param>
+	/// <returns>当前勾选框实例。</returns>
 	public TickBox WithChecked(bool isChecked = true)
 	{
 		_checked = isChecked;
@@ -162,6 +172,9 @@ public sealed partial class TickBox : UiElement
 
 	private sealed partial class RuntimeSettingsTickbox : NSettingsTickbox
 	{
+		/// <summary>
+		/// 节点就绪后连接官方交互信号。
+		/// </summary>
 		public override void _Ready()
 		{
 			ConnectSignals();

@@ -8,6 +8,19 @@ using Godot;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
+/// <summary>
+/// 负责扫描程序集并提取 Mixin 定义的核心组件。
+/// </summary>
+/// <remarks>
+/// <see cref="MixinScanner"/> 执行以下职责：
+/// 1. 使用反射扫描程序集中所有被 <see cref="global::ReForge.MixinAttribute"/> 标记的类型
+/// 2. 验证 Mixin 类型和其关联的注入方法
+/// 3. 构建描述符结构用于后续的补丁绑定
+/// 4. 维护缓存以提高重复扫描的性能
+/// 5. 记录扫描过程中的诊断信息（警告与错误）
+/// 
+/// 扫描结果包含 Mixin 描述符与诊断信息，可用于诊断问题。
+/// </remarks>
 internal sealed class MixinScanner
 {
 	private readonly object _syncRoot = new();
@@ -19,6 +32,17 @@ internal sealed class MixinScanner
 	private readonly MixinValidation _validation = new();
 	private readonly MixinDescriptorBuilder _descriptorBuilder = new();
 
+	/// <summary>
+	/// 扫描指定程序集并提取所有 Mixin 定义。
+	/// </summary>
+	/// <param name="assembly">待扫描的程序集，不可为 null。</param>
+	/// <param name="forceRescan">是否忽略缓存并强制重新扫描。默认为 false。</param>
+	/// <returns>包含 Mixin 描述符与诊断信息的 <see cref="MixinScanResult"/> 对象。</returns>
+	/// <remarks>
+	/// 首次扫描时会执行完整反射与验证；后续扫描（未强制）会返回缓存结果以提高性能。
+	/// 诊断信息可用于识别定义不当的 Mixin 或潜在的问题。
+	/// </remarks>
+	/// <exception cref="ArgumentNullException">当 assembly 为 null 时。</exception>
 	public MixinScanResult Scan(Assembly assembly, bool forceRescan = false)
 	{
 		ArgumentNullException.ThrowIfNull(assembly);
@@ -66,6 +90,13 @@ internal sealed class MixinScanner
 		return result;
 	}
 
+	/// <summary>
+	/// 清除扫描缓存。
+	/// </summary>
+	/// <param name="assembly">
+	/// 待清除的程序集。若为 null，将清除所有缓存。
+	/// 若指定具体程序集，仅清除该程序集的缓存及其相关注册记录。
+	/// </param>
 	public void InvalidateCache(Assembly? assembly = null)
 	{
 		lock (_syncRoot)

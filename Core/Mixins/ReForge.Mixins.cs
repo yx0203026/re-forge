@@ -10,6 +10,23 @@ using ReForgeFramework.Mixins.Runtime;
 
 public static partial class ReForge
 {
+	/// <summary>
+	/// ReForge Mixin 系统的主入口。提供 Mixin 注册、卸载和诊断查询 API。
+	/// </summary>
+	/// <remarks>
+	/// Mixin 系统是一个轻量级的方法补丁框架，构建在 Harmony 之上。
+	/// 典型工作流程：
+	/// 1. 在模组初始化时调用 <see cref="Register(MixinRegistrationOptions)"/>
+	/// 2. 系统自动扫描程序集中被 <see cref="global::ReForge.MixinAttribute"/> 标记的类型
+	/// 3. 验证 Mixin 定义并将其注入应用到目标类型
+	/// 4. 模组卸载时可调用 <see cref="UnregisterAll"/> 移除所有补丁
+	/// 
+	/// 高级特性：
+	/// • 冲突检测与解决
+	/// • 严格模式：扫描错误导致注册中止
+	/// • Shadow 字段映射：通过 <see cref="global::ReForge.ShadowAttribute"/> 访问目标类型私有字段
+	/// • 诊断支持：<see cref="GetStatus"/>、<see cref="GetDiagnosticsSnapshot"/>
+	/// </remarks>
 	public static class Mixins
 	{
 		private static readonly object SyncRoot = new();
@@ -19,6 +36,24 @@ public static partial class ReForge
 
 		private static bool _warningPrinted;
 
+		/// <summary>
+		/// 使用指定的配置选项注册此模组的 Mixin。
+		/// </summary>
+		/// <remarks>
+		/// 此方法执行以下步骤：
+		/// 1. 验证配置选项的有效性
+		/// 2. 扫描指定程序集中的 Mixin 定义
+		/// 3. 验证每个 Mixin 与其注入的合法性
+		/// 4. 应用为生成的 Harmony 补丁
+		/// 5. 返回注册结果与统计信息
+		/// 
+		/// 在严格模式下，任何扫描或验证错误都会导致异常。
+		/// 在非严格模式下，单个 Mixin 的错误不会中止整个注册过程，但会记录在诊断信息中。
+		/// </remarks>
+		/// <param name="options">包含程序集、modId、Harmony 实例等的注册配置。</param>
+		/// <returns>包含注册结果与统计信息的 <see cref="MixinRegistrationResult"/> 对象。</returns>
+		/// <exception cref="ArgumentNullException">当 options 为 null 时。</exception>
+		/// <exception cref="InvalidOperationException">在严格模式下注册失败时。</exception>
 		public static MixinRegistrationResult Register(MixinRegistrationOptions options)
 		{
 			ArgumentNullException.ThrowIfNull(options);
@@ -55,6 +90,19 @@ public static partial class ReForge
 			return result;
 		}
 
+		/// <summary>
+		/// 注册此模组的 Mixin（便捷重载）。
+		/// </summary>
+		/// <remarks>
+		/// 这是 <see cref="Register(MixinRegistrationOptions)"/> 的便捷重载。
+		/// 内部创建标准配置并调用主方法。
+		/// </remarks>
+		/// <param name="assembly">包含 Mixin 定义的程序集。</param>
+		/// <param name="modId">模组的唯一标识符。</param>
+		/// <param name="harmony">用于应用补丁的 Harmony 实例。</param>
+		/// <param name="strictMode">是否启用严格模式（默认 true）。</param>
+		/// <returns>注册结果对象。</returns>
+		/// <exception cref="ArgumentNullException">当任何参数为 null 时。</exception>
 		public static MixinRegistrationResult Register(Assembly assembly, string modId, Harmony harmony, bool strictMode = true)
 		{
 			MixinRegistrationOptions options = MixinRegistrationOptions.CreateMainClassOptions(
@@ -67,6 +115,17 @@ public static partial class ReForge
 			return Register(options);
 		}
 
+		/// <summary>
+		/// 卸载指定模组的所有 Mixin 补丁。
+		/// </summary>
+		/// <remarks>
+		/// 此方法移除已应用的 Harmony 补丁，允许模组的代码恢复到原始行为。
+		/// 如果模组未曾注册，此方法会记录信息但不会报错。
+		/// </remarks>
+		/// <param name="modId">要卸载的模组 ID。</param>
+		/// <returns>包含卸载结果的 <see cref="MixinUnregisterResult"/> 对象。</returns>
+		/// <exception cref="ArgumentNullException">当 modId 为 null。</exception>
+		/// <exception cref="ArgumentException">当 modId 为空或仅为空白。</exception>
 		public static MixinUnregisterResult UnregisterAll(string modId)
 		{
 			ValidateRequiredKey(modId, nameof(modId));
@@ -113,6 +172,14 @@ public static partial class ReForge
 			);
 		}
 
+		/// <summary>
+		/// 获取所有已注册模组的当前状态快照。
+		/// </summary>
+		/// <remarks>
+		/// 快照包含所有已显式注册和生命周期追踪的模组的状态。
+		/// 若快照为空（未作任何显式注册），系统会输出一条警告消息。
+		/// </remarks>
+		/// <returns>包含所有模组状态的 <see cref="MixinStatusSnapshot"/> 对象。</returns>
 		public static MixinStatusSnapshot GetStatus()
 		{
 			bool shouldWarn = false;
@@ -161,6 +228,14 @@ public static partial class ReForge
 			);
 		}
 
+		/// <summary>
+		/// 获取详细的诊断信息快照（包括所有补丁应用记录）。
+		/// </summary>
+		/// <remarks>
+		/// 此快照包含注册信息、生命周期状态、已应用补丁的完整列表等详细诊断数据。
+		/// 适用于深度调试与问题诊断。
+		/// </remarks>
+		/// <returns>包含完整诊断信息的 <see cref="MixinDiagnosticsSnapshot"/> 对象。</returns>
 		public static MixinDiagnosticsSnapshot GetDiagnosticsSnapshot()
 		{
 			MixinStatusSnapshot registrationStatus = GetStatus();
@@ -169,6 +244,14 @@ public static partial class ReForge
 			return Diagnostics.BuildSnapshot(registrationStatus, lifecycleSnapshot, appliedEntries);
 		}
 
+		/// <summary>
+		/// 获取诊断信息的 JSON 表示。
+		/// </summary>
+		/// <remarks>
+		/// 此方法将诊断快照序列化为 JSON 字符串，便于日志记录或远程分析。
+		/// </remarks>
+		/// <param name="indented">是否使用缩进格式化输出（默认 true）。</param>
+		/// <returns>JSON 格式的诊断信息字符串。</returns>
 		public static string GetDiagnosticsJson(bool indented = true)
 		{
 			MixinDiagnosticsSnapshot snapshot = GetDiagnosticsSnapshot();

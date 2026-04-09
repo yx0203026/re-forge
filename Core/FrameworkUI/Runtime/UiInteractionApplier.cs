@@ -14,13 +14,27 @@ internal static class UiInteractionApplier
 
 	private sealed class InteractionState
 	{
+		/// <summary>
+		/// 左键是否按下。
+		/// </summary>
 		public bool LeftPressed { get; set; }
 
+		/// <summary>
+		/// 右键是否按下。
+		/// </summary>
 		public bool RightPressed { get; set; }
 
+		/// <summary>
+		/// 是否处于拖拽状态。
+		/// </summary>
 		public bool IsDragging => LeftPressed || RightPressed;
 	}
 
+	/// <summary>
+	/// 将交互选项绑定到目标控件。
+	/// </summary>
+	/// <param name="control">目标控件。</param>
+	/// <param name="options">交互配置。</param>
 	public static void Apply(Control control, UiInteractionOptions options)
 	{
 		if (!options.HasAnyHandlers)

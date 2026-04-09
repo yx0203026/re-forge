@@ -10,10 +10,17 @@ using UiRichText = ReForgeFramework.UI.Controls.RichText;
 
 namespace ReForgeFramework.UI.Examples;
 
+/// <summary>
+/// FrameworkUI 快速引导示例，演示主菜单与设置页注入。
+/// </summary>
 public static class UiBootstrapExample
 {
 	private static bool _configured;
 
+	/// <summary>
+	/// 初始化示例注入逻辑并执行一次系统区域重注入。
+	/// </summary>
+	/// <param name="enableDemo">是否启用示例内容。</param>
 	public static void Bootstrap(bool enableDemo = true)
 	{
 		if (!_configured)

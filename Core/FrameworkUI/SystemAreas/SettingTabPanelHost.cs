@@ -30,6 +30,10 @@ public sealed class SettingTabPanelHost : SystemUiAreaHost
 	{
 	}
 
+	/// <summary>
+	/// 添加或复用一个设置标签并尝试挂载到官方设置页。
+	/// </summary>
+	/// <param name="tab">设置标签实例。</param>
 	public void AddChild(SettingTab tab)
 	{
 		ArgumentNullException.ThrowIfNull(tab);
@@ -117,6 +121,11 @@ public sealed class SettingTabPanelHost : SystemUiAreaHost
 		TryBind();
 	}
 
+	/// <summary>
+	/// 按 screenKey 获取已注册的设置标签。
+	/// </summary>
+	/// <param name="screenKey">设置标签键。</param>
+	/// <returns>匹配的标签；未命中返回 null。</returns>
 	public SettingTab? GetSettingTab(string screenKey)
 	{
 		if (string.IsNullOrWhiteSpace(screenKey))

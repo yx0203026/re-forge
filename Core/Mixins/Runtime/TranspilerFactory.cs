@@ -9,6 +9,12 @@ using HarmonyLib;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
+/// <summary>
+/// Transpiler 委托，用于在 IL 级别修改方法代码。
+/// </summary>
+/// <param name="instructions">原方法的 IL 指令序列。</param>
+/// <param name="ilGenerator">IL 生成器，用于必要时生成新指令。</param>
+/// <returns>修改后的 IL 指令序列。</returns>
 internal delegate IEnumerable<CodeInstruction> RuntimeTranspiler(
 	IEnumerable<CodeInstruction> instructions,
 	ILGenerator ilGenerator
@@ -17,6 +23,15 @@ internal delegate IEnumerable<CodeInstruction> RuntimeTranspiler(
 /// <summary>
 /// Transpiler 工厂：为高级注入语义（ModifyArg / ModifyConstant / Redirect）生成 IL 操作方法。
 /// </summary>
+/// <remarks>
+/// Transpiler 是 Harmony 提供的强大工具，允许直接修改方法的 IL 中间代码。
+/// 此工厂生成用于以下场景的 Transpiler：
+/// • ModifyArg：修改方法参数
+/// • ModifyConstant：修改常量值
+/// • Redirect：重新路由方法调用
+/// 
+/// 每个工厂方法生成一个 <see cref="RuntimeTranspiler"/> 委托，接受原 IL 指令并返回修改后的指令。
+/// </remarks>
 internal sealed class TranspilerFactory
 {
 	// ═══════════════════════════════════════════════════════════════════════════════════════
@@ -24,12 +39,22 @@ internal sealed class TranspilerFactory
 	// ═══════════════════════════════════════════════════════════════════════════════════════
 
 	/// <summary>
-	/// 生成 ModifyArg Transpiler，在目标调用点前插入对 handler 的调用来修改参数。
+	/// 创建 ModifyArg 类型的 Transpiler，在目标调用点前插入对 handler 的调用来修改参数。
 	/// </summary>
-	/// <param name="targetCallSite">要拦截的目标调用（可选，为空则拦截所有匹配的参数加载）</param>
-	/// <param name="argumentIndex">要修改的参数索引（0-based）</param>
-	/// <param name="handlerMethod">处理方法：接收原参数值，返回修改后的值</param>
-	/// <param name="ordinal">匹配序号，-1 表示全部匹配</param>
+	/// <remarks>
+	/// 流程：
+	/// 1. 扫描 IL 中的参数加载指令（如 ldarg.0）
+	/// 2. 在加载参数后插入 handler 调用
+	/// 3. handler 接收原参数值并返回修改后的值
+	/// 4. 原始参数值被替换为 handler 的返回值
+	/// 
+	/// 这种方式允许在方法调用前动态修改参数。
+	/// </remarks>
+	/// <param name="targetCallSite">要拦截的目标调用（若指定）。若为 null，则拦截所有匹配参数索引的加载。</param>
+	/// <param name="argumentIndex">要修改的参数索引（0-based，this 算作 0）。</param>
+	/// <param name="handlerMethod">处理方法，接收参数原值并返回修改值。签名应为 `ParamType(ParamType original)`。</param>
+	/// <param name="ordinal">匹配序号。-1 表示修改所有匹配的参数；非负值表示只修改第 N 次匹配。</param>
+	/// <returns>产生修改后 IL 指令序列的 Transpiler。</returns>
 	public static RuntimeTranspiler CreateModifyArgTranspiler(
 		MethodBase? targetCallSite,
 		int argumentIndex,

@@ -9,6 +9,9 @@ using ReForgeFramework.UI.Localization;
 
 namespace ReForgeFramework.UI.Controls;
 
+/// <summary>
+/// 富文本控件，支持 BBCode 并保持官方字体与配色风格。
+/// </summary>
 public class RichText : UiElement
 {
 	private static readonly Font NormalFont = LoadFontOrFallback("res://themes/source_code_pro_medium_shared.tres");
@@ -20,6 +23,14 @@ public class RichText : UiElement
 	private readonly string? _locTable;
 	private readonly string? _locEntryKey;
 
+	/// <summary>
+	/// 初始化富文本控件。
+	/// </summary>
+	/// <param name="text">默认显示文本。</param>
+	/// <param name="bbcodeEnabled">是否启用 BBCode。</param>
+	/// <param name="textKey">UI 本地化 key。</param>
+	/// <param name="locTable">官方本地化表名。</param>
+	/// <param name="locEntryKey">官方本地化词条键。</param>
 	public RichText(
 		string text,
 		bool bbcodeEnabled = true,

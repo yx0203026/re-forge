@@ -7,6 +7,9 @@ using ReForgeFramework.UI.Localization;
 
 namespace ReForgeFramework.UI.Controls;
 
+/// <summary>
+/// 通用按钮控件，支持本地化文本、官方样式模板与自定义样式回调。
+/// </summary>
 public class Button : UiElement
 {
 	private readonly string _text;
@@ -17,6 +20,16 @@ public class Button : UiElement
 	private readonly UiButtonStylePreset _stylePreset;
 	private readonly Action<Godot.Button>? _customStyler;
 
+	/// <summary>
+	/// 初始化按钮控件。
+	/// </summary>
+	/// <param name="text">默认显示文本。</param>
+	/// <param name="onClick">点击回调。</param>
+	/// <param name="textKey">UI 本地化 key。</param>
+	/// <param name="locTable">官方本地化表名。</param>
+	/// <param name="locEntryKey">官方本地化词条键。</param>
+	/// <param name="stylePreset">按钮样式预设。</param>
+	/// <param name="customStyler">原生按钮额外样式回调。</param>
 	public Button(
 		string text = "Button",
 		Action? onClick = null,

@@ -9,6 +9,9 @@ using ReForgeFramework.UI.Localization;
 
 namespace ReForgeFramework.UI.Controls;
 
+/// <summary>
+/// 主菜单按钮控件，优先复用官方按钮节点与交互行为。
+/// </summary>
 public sealed partial class MainMenuButton : UiElement
 {
 	private readonly string _text;
@@ -17,6 +20,14 @@ public sealed partial class MainMenuButton : UiElement
 	private readonly string? _locEntryKey;
 	private readonly Action? _onClick;
 
+	/// <summary>
+	/// 初始化主菜单按钮。
+	/// </summary>
+	/// <param name="text">默认显示文本。</param>
+	/// <param name="onClick">点击回调。</param>
+	/// <param name="textKey">UI 本地化 key。</param>
+	/// <param name="locTable">官方本地化表名。</param>
+	/// <param name="locEntryKey">官方本地化词条键。</param>
 	public MainMenuButton(
 		string text = "ReForge",
 		Action? onClick = null,
@@ -45,6 +56,14 @@ public sealed partial class MainMenuButton : UiElement
 		private readonly Action? _onClick;
 		private bool _initialized;
 
+		/// <summary>
+		/// 初始化主菜单按钮运行时代理节点。
+		/// </summary>
+		/// <param name="text">默认显示文本。</param>
+		/// <param name="onClick">点击回调。</param>
+		/// <param name="textKey">UI 本地化 key。</param>
+		/// <param name="locTable">官方本地化表名。</param>
+		/// <param name="locEntryKey">官方本地化词条键。</param>
 		public MainMenuStyledProxy(string text, Action? onClick, string? textKey, string? locTable, string? locEntryKey)
 		{
 			_text = text;
@@ -58,6 +77,9 @@ public sealed partial class MainMenuButton : UiElement
 			FocusMode = FocusModeEnum.All;
 		}
 
+		/// <summary>
+		/// 节点就绪后延迟初始化视觉结构，确保父节点层级稳定。
+		/// </summary>
 		public override void _Ready()
 		{
 			CallDeferred(nameof(InitializeVisual));

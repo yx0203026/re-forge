@@ -9,6 +9,9 @@ using ReForgeFramework.UI.Localization;
 
 namespace ReForgeFramework.UI.Controls;
 
+/// <summary>
+/// 官方风格文本控件，基于 MegaLabel 并支持本地化刷新。
+/// </summary>
 public class Label : UiElement
 {
 	private static readonly Font LabelFont = LoadFontOrFallback("res://themes/kreon_regular_shared.tres");
@@ -19,6 +22,13 @@ public class Label : UiElement
 	private readonly string? _locTable;
 	private readonly string? _locEntryKey;
 
+	/// <summary>
+	/// 初始化文本控件。
+	/// </summary>
+	/// <param name="text">默认显示文本。</param>
+	/// <param name="textKey">UI 本地化 key。</param>
+	/// <param name="locTable">官方本地化表名。</param>
+	/// <param name="locEntryKey">官方本地化词条键。</param>
 	public Label(string text, string? textKey = null, string? locTable = null, string? locEntryKey = null)
 	{
 		_text = text;

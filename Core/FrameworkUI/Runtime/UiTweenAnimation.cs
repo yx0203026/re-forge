@@ -11,6 +11,14 @@ internal static class UiTweenAnimation
 {
 	private static readonly StringName MetaScaleTween = "__reforge_scale_tween";
 
+	/// <summary>
+	/// 对目标控件执行缩放补间动画。
+	/// </summary>
+	/// <param name="control">目标控件。</param>
+	/// <param name="targetScale">目标缩放。</param>
+	/// <param name="duration">动画时长（秒）。</param>
+	/// <param name="transitionType">缓动过渡类型。</param>
+	/// <param name="easeType">缓动方向。</param>
 	public static void TweenScale(
 		Control control,
 		Vector2 targetScale,
