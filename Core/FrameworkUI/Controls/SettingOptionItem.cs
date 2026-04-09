@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Godot;
 using MegaCrit.Sts2.Core.HoverTips;
@@ -90,6 +91,8 @@ public sealed class SettingOptionItem : UiElement
 				return;
 			}
 
+			EnsureHoverTipKeysInLocTable(locTable, titleLocKey, descriptionLocKey);
+
 			NHoverTipSet.Remove(owner);
 			HoverTip tip = new(
 				new LocString(locTable, titleLocKey),
@@ -111,6 +114,31 @@ public sealed class SettingOptionItem : UiElement
 		});
 
 		return this;
+	}
+
+	private static void EnsureHoverTipKeysInLocTable(string locTable, string titleLocKey, string descriptionLocKey)
+	{
+		try
+		{
+			if (LocManager.Instance == null)
+			{
+				return;
+			}
+
+			string titleText = UiLocalization.GetText(null, titleLocKey, locTable, titleLocKey);
+			string descriptionText = UiLocalization.GetText(null, descriptionLocKey, locTable, descriptionLocKey);
+			Dictionary<string, string> patch = new(StringComparer.Ordinal)
+			{
+				[titleLocKey] = titleText,
+				[descriptionLocKey] = descriptionText
+			};
+
+			LocManager.Instance.GetTable(locTable).MergeWith(patch);
+		}
+		catch
+		{
+			// 悬浮提示不应因本地化补丁失败而中断交互流程。
+		}
 	}
 
 	protected override Control CreateControl()

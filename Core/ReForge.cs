@@ -6,6 +6,8 @@ using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Nodes;
 using ReForgeFramework.EventBus.Examples;
 using ReForgeFramework.Mixins.Runtime;
+using ReForgeFramework.ModLoading;
+using ReForgeFramework.ModResources;
 using ReForgeFramework.UI;
 using ReForgeFramework.UI.Examples;
 
@@ -55,6 +57,7 @@ public static partial class ReForge
 		}
 
 		EventBus.Initialize();
+		ReForgeModManager.Initialize();
 		SchedulePostInitialization();
 		GD.Print("[ReForge] initialized.");
 	}
@@ -103,6 +106,7 @@ public static partial class ReForge
 			}
 
 			string currentLanguage = LocManager.Instance.Language;
+			LocalizationResourceBridge.RefreshCurrentLanguage();
 			LocManager.Instance.SetLanguage(currentLanguage);
 			NGame.Instance?.Relocalize();
 		}

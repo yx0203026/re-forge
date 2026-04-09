@@ -16,6 +16,17 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="reforge\image\reforge-logo-text.png">
+      <LogicalName>reforge/image/reforge-logo-text.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="reforge\localization\eng\gameplay_ui.json">
+      <LogicalName>reforge/localization/eng/gameplay_ui.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="reforge\localization\zhs\gameplay_ui.json">
+      <LogicalName>reforge/localization/zhs/gameplay_ui.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
     <Folder Include="Core\Mixins\Examples\" />
   </ItemGroup>
 </Project>
