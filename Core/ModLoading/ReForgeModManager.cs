@@ -76,6 +76,74 @@ public static class ReForgeModManager
 	}
 
 	/// <summary>
+	/// 在游戏根目录的 dev 子目录下创建一个新的模组 C# 项目脚手架。
+	/// </summary>
+	/// <param name="modName">用户输入的模组名称，将作为目录名与项目名。</param>
+	/// <param name="createdProjectPath">创建成功时输出项目目录路径。</param>
+	/// <param name="errorMessage">创建失败时输出错误信息。</param>
+	/// <returns>创建成功返回 true，否则返回 false。</returns>
+	public static bool TryCreateDevModProject(string modName, out string createdProjectPath, out string errorMessage)
+	{
+		createdProjectPath = string.Empty;
+		errorMessage = string.Empty;
+
+		if (string.IsNullOrWhiteSpace(modName))
+		{
+			errorMessage = "Mod name cannot be empty.";
+			return false;
+		}
+
+		string trimmedName = modName.Trim();
+		if (!IsValidProjectDirectoryName(trimmedName))
+		{
+			errorMessage = "Mod name contains invalid path characters.";
+			return false;
+		}
+
+		string executablePath = OS.GetExecutablePath();
+		string? gameRoot = Path.GetDirectoryName(executablePath);
+		if (string.IsNullOrWhiteSpace(gameRoot))
+		{
+			errorMessage = "Cannot resolve game root directory from executable path.";
+			return false;
+		}
+
+		string devRoot = Path.Combine(gameRoot, "dev");
+		string modRoot = Path.Combine(devRoot, trimmedName);
+		if (Directory.Exists(modRoot))
+		{
+			errorMessage = $"Target directory already exists: {modRoot}";
+			return false;
+		}
+
+		try
+		{
+			Directory.CreateDirectory(devRoot);
+			Directory.CreateDirectory(modRoot);
+
+			string resourceFolderName = BuildResourceFolderName(trimmedName);
+			string resourceFolderPath = Path.Combine(modRoot, resourceFolderName);
+			Directory.CreateDirectory(resourceFolderPath);
+
+			string projectFilePath = Path.Combine(modRoot, trimmedName + ".csproj");
+			string csproj = BuildProjectFileText(resourceFolderName);
+			File.WriteAllText(projectFilePath, csproj, Encoding.UTF8);
+
+			string modMainFilePath = Path.Combine(modRoot, "ModMain.cs");
+			string modMainCode = BuildModMainText(trimmedName);
+			File.WriteAllText(modMainFilePath, modMainCode, Encoding.UTF8);
+
+			createdProjectPath = modRoot;
+			return true;
+		}
+		catch (Exception ex)
+		{
+			errorMessage = $"Failed to create dev mod project: {ex.Message}";
+			return false;
+		}
+	}
+
+	/// <summary>
 	/// 获取当前启动过程中实际使用的模组加载设置。
 	/// </summary>
 	/// <returns>运行中设置快照。</returns>
@@ -286,6 +354,145 @@ public static class ReForgeModManager
 		bytes = result;
 		Diagnostics.TrackResourceResolve(mod.ModId, normalizedPath, mod.SourceKind.ToString(), success: true, "Resource loaded.");
 		return true;
+	}
+
+	private static bool IsValidProjectDirectoryName(string modName)
+	{
+		if (modName.Equals(".", StringComparison.Ordinal) || modName.Equals("..", StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		char[] invalidChars = Path.GetInvalidFileNameChars();
+		for (int i = 0; i < modName.Length; i++)
+		{
+			char c = modName[i];
+			if (Array.IndexOf(invalidChars, c) >= 0)
+			{
+				return false;
+			}
+
+			if (c == '/' || c == '\\')
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static string BuildResourceFolderName(string modName)
+	{
+		StringBuilder builder = new();
+		bool previousWasSeparator = false;
+		for (int i = 0; i < modName.Length; i++)
+		{
+			char current = modName[i];
+			if (char.IsLetterOrDigit(current))
+			{
+				builder.Append(char.ToLowerInvariant(current));
+				previousWasSeparator = false;
+			}
+			else if (!previousWasSeparator)
+			{
+				builder.Append('_');
+				previousWasSeparator = true;
+			}
+		}
+
+		string normalized = builder.ToString().Trim('_');
+		return string.IsNullOrWhiteSpace(normalized) ? "new_mod" : normalized;
+	}
+
+	private static string BuildProjectFileText(string resourceFolderName)
+	{
+		StringBuilder builder = new();
+		builder.AppendLine("<Project Sdk=\"Godot.NET.Sdk/4.5.1\">");
+		builder.AppendLine();
+		builder.AppendLine("  <PropertyGroup>");
+		builder.AppendLine("    <TargetFramework>net9.0</TargetFramework>");
+		builder.AppendLine("    <TargetFramework Condition=\" '$(GodotTargetPlatform)' == 'android' \">net9.0</TargetFramework>");
+		builder.AppendLine("    <EnableDynamicLoading>true</EnableDynamicLoading>");
+		builder.AppendLine("    <OutputPath>build\\</OutputPath>");
+		builder.AppendLine("  </PropertyGroup>");
+		builder.AppendLine();
+		builder.AppendLine("  <ItemGroup>");
+		builder.AppendLine("    <Reference Include=\"ReForge.dll\" />");
+		builder.AppendLine("    <Reference Include=\"data_sts2_windows_x86_64\\0Harmony.dll\" />");
+		builder.AppendLine("    <Reference Include=\"data_sts2_windows_x86_64\\sts2.dll\" />");
+		builder.AppendLine("  </ItemGroup>");
+		builder.AppendLine();
+		builder.AppendLine("  <ItemGroup>");
+		builder.AppendLine($"    <EmbeddedResource Include=\"{resourceFolderName}\\**\\*\" />");
+		builder.AppendLine("  </ItemGroup>");
+		builder.AppendLine();
+		builder.AppendLine("</Project>");
+		return builder.ToString();
+	}
+
+	private static string BuildModMainText(string modName)
+	{
+		string modNamespace = BuildCSharpIdentifier(modName) + ".Generated";
+		string harmonyId = BuildResourceFolderName(modName) + ".mod";
+
+		StringBuilder builder = new();
+		builder.AppendLine("using Godot;");
+		builder.AppendLine("using HarmonyLib;");
+		builder.AppendLine("using MegaCrit.Sts2.Core.Modding;");
+		builder.AppendLine();
+		builder.Append("namespace ").Append(modNamespace).AppendLine(";");
+		builder.AppendLine();
+		builder.AppendLine("[ModInitializer(nameof(Initialize))]");
+		builder.AppendLine("public static class ModMain");
+		builder.AppendLine("{");
+		builder.AppendLine("\tprivate static bool _initialized;");
+		builder.AppendLine("\tprivate static Harmony? _harmony;");
+		builder.AppendLine();
+		builder.AppendLine("\tprivate static void Initialize()");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tif (_initialized)");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\treturn;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine();
+		builder.AppendLine("\t\t_initialized = true;");
+		builder.Append("\t\t_harmony = new Harmony(\"").Append(harmonyId).AppendLine("\");");
+		builder.AppendLine("\t\t_harmony.PatchAll();");
+		builder.Append("\t\tGD.Print(\"[").Append(harmonyId).AppendLine("] initialized.\");");
+		builder.AppendLine("\t}");
+		builder.AppendLine("}");
+
+		return builder.ToString();
+	}
+
+	private static string BuildCSharpIdentifier(string modName)
+	{
+		StringBuilder builder = new();
+		bool capitalizeNext = true;
+		for (int i = 0; i < modName.Length; i++)
+		{
+			char current = modName[i];
+			if (!char.IsLetterOrDigit(current))
+			{
+				capitalizeNext = true;
+				continue;
+			}
+
+			if (builder.Length == 0 && char.IsDigit(current))
+			{
+				builder.Append('_');
+			}
+
+			builder.Append(capitalizeNext ? char.ToUpperInvariant(current) : current);
+			capitalizeNext = false;
+		}
+
+		if (builder.Length == 0)
+		{
+			return "NewMod";
+		}
+
+		return builder.ToString();
 	}
 
 	private static void EnsureSelfContext(List<ReForgeModContext> discovered)

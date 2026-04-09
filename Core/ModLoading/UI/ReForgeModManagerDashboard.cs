@@ -29,6 +29,10 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 		private RichTextLabel _summaryLabel = null!;
 		private RichTextLabel _detailsLabel = null!;
 		private RichTextLabel _pendingLabel = null!;
+		private CanvasLayer _createModDialogLayer = null!;
+		private Control _createModDialogOverlay = null!;
+		private LineEdit _createModNameInput = null!;
+		private RichTextLabel _createModDialogMessage = null!;
 		private string? _selectedModId;
 
 		/// <summary>
@@ -124,6 +128,14 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 				minimumSize: new Vector2(156f, 42f));
 			agreementRow.AddChild(refreshButton);
 
+			Godot.Button createNewModButton = BuildButton(
+				fallbackText: "Create New Mod",
+				locKey: "REFORGE.MOD_MANAGER.CREATE_MOD_BUTTON",
+				onPressed: OpenCreateModDialog,
+				preset: UiButtonStylePreset.OfficialConfirm,
+				minimumSize: new Vector2(240f, 42f));
+			agreementRow.AddChild(createNewModButton);
+
 			_summaryLabel = BuildDynamicText(minHeight: 64f, minWidth: 0f, bbcodeEnabled: true);
 			_summaryLabel.AddThemeColorOverride("default_color", StsColors.cream);
 			root.AddChild(_summaryLabel);
@@ -196,6 +208,279 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 			_pendingLabel.HorizontalAlignment = HorizontalAlignment.Center;
 			_pendingLabel.AddThemeColorOverride("default_color", new Color(1f, 0.333333f, 0.333333f, 1f));
 			root.AddChild(_pendingLabel);
+
+			BuildCreateModDialog();
+		}
+
+		private void BuildCreateModDialog()
+		{
+			_createModDialogLayer = new CanvasLayer
+			{
+				Name = "CreateModDialogLayer",
+				Layer = 120,
+				Visible = false
+			};
+			AddChild(_createModDialogLayer);
+
+			_createModDialogOverlay = new Control
+			{
+				Name = "CreateModDialogOverlay",
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				SizeFlagsVertical = SizeFlags.ExpandFill,
+				MouseFilter = MouseFilterEnum.Stop,
+				FocusMode = FocusModeEnum.All
+			};
+			_createModDialogOverlay.SetAnchorsPreset(LayoutPreset.FullRect);
+			_createModDialogLayer.AddChild(_createModDialogOverlay);
+
+			ColorRect dimBackground = new()
+			{
+				Name = "DimBackground",
+				Color = new Color(0f, 0f, 0f, 0.64f),
+				MouseFilter = MouseFilterEnum.Stop
+			};
+			dimBackground.SetAnchorsPreset(LayoutPreset.FullRect);
+			_createModDialogOverlay.AddChild(dimBackground);
+
+			ScrollContainer overlayScroll = new()
+			{
+				Name = "OverlayScroll",
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				SizeFlagsVertical = SizeFlags.ExpandFill,
+				HorizontalScrollMode = ScrollContainer.ScrollMode.Auto,
+				VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+				MouseFilter = MouseFilterEnum.Stop,
+				FollowFocus = true
+			};
+			overlayScroll.SetAnchorsPreset(LayoutPreset.FullRect);
+			_createModDialogOverlay.AddChild(overlayScroll);
+
+			CenterContainer center = new()
+			{
+				Name = "DialogCenter",
+				MouseFilter = MouseFilterEnum.Ignore,
+				CustomMinimumSize = new Vector2(0f, 0f)
+			};
+			overlayScroll.AddChild(center);
+			overlayScroll.Resized += () =>
+			{
+				if (!GodotObject.IsInstanceValid(center) || !GodotObject.IsInstanceValid(overlayScroll))
+				{
+					return;
+				}
+
+				// 让居中容器至少与视口同尺寸，保证可滚动时也维持居中体验。
+				center.CustomMinimumSize = overlayScroll.Size;
+			};
+			Callable.From(() =>
+			{
+				if (!GodotObject.IsInstanceValid(center) || !GodotObject.IsInstanceValid(overlayScroll))
+				{
+					return;
+				}
+
+				center.CustomMinimumSize = overlayScroll.Size;
+			}).CallDeferred();
+
+			PanelContainer panel = new()
+			{
+				Name = "DialogPanel",
+				CustomMinimumSize = new Vector2(680f, 280f),
+				MouseFilter = MouseFilterEnum.Stop,
+				SizeFlagsHorizontal = SizeFlags.ShrinkCenter,
+				SizeFlagsVertical = SizeFlags.ShrinkCenter
+			};
+			panel.AddThemeStyleboxOverride("panel", CreateDialogPanelStyle());
+			center.AddChild(panel);
+
+			MarginContainer panelMargin = new()
+			{
+				Name = "DialogMargin",
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				SizeFlagsVertical = SizeFlags.ExpandFill
+			};
+			panelMargin.AddThemeConstantOverride("margin_left", 18);
+			panelMargin.AddThemeConstantOverride("margin_top", 16);
+			panelMargin.AddThemeConstantOverride("margin_right", 18);
+			panelMargin.AddThemeConstantOverride("margin_bottom", 16);
+			panel.AddChild(panelMargin);
+
+			VBoxContainer body = new()
+			{
+				Name = "DialogBody",
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				SizeFlagsVertical = SizeFlags.ExpandFill
+			};
+			body.AddThemeConstantOverride("separation", 12);
+			panelMargin.AddChild(body);
+
+			RichTextLabel dialogTitle = BuildStaticText(
+				fallbackText: "[gold]Create New Mod[/gold]",
+				locKey: "REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_TITLE",
+				minHeight: 44f);
+			dialogTitle.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+			body.AddChild(dialogTitle);
+
+			_createModNameInput = new LineEdit
+			{
+				Name = "CreateModNameInput",
+				PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_PLACEHOLDER", "Input mod name..."),
+				CustomMinimumSize = new Vector2(0f, 48f),
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				ClearButtonEnabled = true
+			};
+			ApplyDialogInputStyle(_createModNameInput);
+			_createModNameInput.TextSubmitted += _ => ConfirmCreateMod();
+			body.AddChild(_createModNameInput);
+
+			_createModDialogMessage = BuildDynamicText(minHeight: 42f, minWidth: 0f, bbcodeEnabled: false);
+			_createModDialogMessage.AddThemeColorOverride("default_color", StsColors.red);
+			_createModDialogMessage.Visible = false;
+			body.AddChild(_createModDialogMessage);
+
+			HBoxContainer buttonRow = new()
+			{
+				Name = "DialogButtons",
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				Alignment = BoxContainer.AlignmentMode.End
+			};
+			buttonRow.AddThemeConstantOverride("separation", 10);
+			body.AddChild(buttonRow);
+
+			Godot.Button cancelButton = BuildButton(
+				fallbackText: "Cancel",
+				locKey: "REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_CANCEL",
+				onPressed: CloseCreateModDialog,
+				preset: UiButtonStylePreset.OfficialBack,
+				minimumSize: new Vector2(150f, 42f));
+			buttonRow.AddChild(cancelButton);
+
+			Godot.Button confirmButton = BuildButton(
+				fallbackText: "Create",
+				locKey: "REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_CONFIRM",
+				onPressed: ConfirmCreateMod,
+				preset: UiButtonStylePreset.OfficialConfirm,
+				minimumSize: new Vector2(170f, 42f));
+			buttonRow.AddChild(confirmButton);
+		}
+
+		private void OpenCreateModDialog()
+		{
+			if (!GodotObject.IsInstanceValid(_createModDialogOverlay))
+			{
+				return;
+			}
+
+			_createModNameInput.PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_PLACEHOLDER", "Input mod name...");
+			_createModNameInput.Text = string.Empty;
+			SetCreateModDialogMessage(string.Empty, isError: false);
+			_createModDialogLayer.Visible = true;
+			_createModNameInput.GrabFocus();
+		}
+
+		private void CloseCreateModDialog()
+		{
+			if (!GodotObject.IsInstanceValid(_createModDialogLayer))
+			{
+				return;
+			}
+
+			_createModDialogLayer.Visible = false;
+		}
+
+		private void ConfirmCreateMod()
+		{
+			string modName = _createModNameInput.Text?.Trim() ?? string.Empty;
+			if (string.IsNullOrWhiteSpace(modName))
+			{
+				SetCreateModDialogMessage(
+					T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_EMPTY_NAME", "Please input a valid mod name."),
+					isError: true);
+				return;
+			}
+
+			if (!ReForgeModManager.TryCreateDevModProject(modName, out string createdPath, out string errorMessage))
+			{
+				SetCreateModDialogMessage(SanitizeText(errorMessage), isError: true);
+				return;
+			}
+
+			string successText = string.Format(
+				T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_SUCCESS", "Project created at: {0}"),
+				SanitizeText(createdPath));
+			GD.Print($"[ReForge.ModLoader] {successText}");
+			GD.Print($"[ReForge.ModLoader] Created dev mod project: {createdPath}");
+			CloseCreateModDialog();
+			Refresh(preserveSelection: true);
+		}
+
+		private void SetCreateModDialogMessage(string message, bool isError)
+		{
+			if (!GodotObject.IsInstanceValid(_createModDialogMessage))
+			{
+				return;
+			}
+
+			bool hasMessage = !string.IsNullOrWhiteSpace(message);
+			_createModDialogMessage.Visible = hasMessage;
+			_createModDialogMessage.Text = hasMessage ? message : string.Empty;
+			_createModDialogMessage.AddThemeColorOverride(
+				"default_color",
+				isError ? StsColors.red : StsColors.cream);
+		}
+
+		private static StyleBoxFlat CreateDialogPanelStyle()
+		{
+			return new StyleBoxFlat
+			{
+				DrawCenter = true,
+				BgColor = new Color(0.07451f, 0.117647f, 0.172549f, 0.98f),
+				BorderColor = new Color(0.941176f, 0.705882f, 0.282353f, 1f),
+				BorderWidthLeft = 2,
+				BorderWidthTop = 2,
+				BorderWidthRight = 2,
+				BorderWidthBottom = 2,
+				CornerRadiusBottomLeft = 8,
+				CornerRadiusBottomRight = 8,
+				CornerRadiusTopLeft = 8,
+				CornerRadiusTopRight = 8
+			};
+		}
+
+		private static void ApplyDialogInputStyle(LineEdit input)
+		{
+			input.AddThemeStyleboxOverride("normal", CreateDialogInputStyle(
+				bgColor: new Color(0.082353f, 0.101961f, 0.133333f, 0.94f),
+				borderColor: new Color(0.309804f, 0.52549f, 0.709804f, 1f)));
+			input.AddThemeStyleboxOverride("focus", CreateDialogInputStyle(
+				bgColor: new Color(0.109804f, 0.14902f, 0.215686f, 0.96f),
+				borderColor: new Color(0.941176f, 0.705882f, 0.282353f, 1f)));
+			input.AddThemeColorOverride("font_color", StsColors.cream);
+			input.AddThemeColorOverride("font_placeholder_color", new Color(0.784314f, 0.760784f, 0.678431f, 0.58f));
+			input.AddThemeColorOverride("font_selected_color", Colors.White);
+			input.AddThemeColorOverride("selection_color", new Color(0.427451f, 0.584314f, 0.780392f, 0.45f));
+		}
+
+		private static StyleBoxFlat CreateDialogInputStyle(Color bgColor, Color borderColor)
+		{
+			return new StyleBoxFlat
+			{
+				DrawCenter = true,
+				BgColor = bgColor,
+				BorderColor = borderColor,
+				BorderWidthLeft = 2,
+				BorderWidthTop = 2,
+				BorderWidthRight = 2,
+				BorderWidthBottom = 2,
+				CornerRadiusBottomLeft = 5,
+				CornerRadiusBottomRight = 5,
+				CornerRadiusTopLeft = 5,
+				CornerRadiusTopRight = 5,
+				ContentMarginLeft = 12f,
+				ContentMarginRight = 12f,
+				ContentMarginTop = 9f,
+				ContentMarginBottom = 9f
+			};
 		}
 
 		private static VBoxContainer GetSectionBody(PanelContainer section)
