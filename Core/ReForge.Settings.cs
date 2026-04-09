@@ -5,11 +5,13 @@ using System.Diagnostics;
 using System.Text.Json;
 using Godot;
 using ReForgeFramework.UI.Controls;
+using ReForgeFramework.ModLoading.UI;
 using ReForgeFramework.UI.SystemAreas;
 
 public static partial class ReForge
 {
 	private const string SettingsScreenKey = "ReForge.Settings";
+	private const string ModManagerScreenKey = "ReForge.ModManager";
 	private const string FeedbackRepositoryUrl = "https://github.com/yx0203026/re-forge";
 	private static bool _settingsInitialized;
 	private static readonly ReForgeSettingsData RuntimeSettings = ReForgeSettingsStore.Load();
@@ -61,6 +63,23 @@ public static partial class ReForge
 			.WithHoverTip("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TIP_TITLE", "REFORGE.SETTINGS.FEEDBACK_TIP_DESC");
 
 		tab.Add(feedbackItem);
+
+		RegisterModManagerTab(tabHost);
+	}
+
+	private static void RegisterModManagerTab(SettingTabPanelHost tabHost)
+	{
+		string modManagerTabTitle = UI.T("gameplay_ui", "REFORGE.MOD_MANAGER.TAB", "Mod Manager");
+		tabHost.AddChild(new SettingTab(modManagerTabTitle, selected: false, screenKey: ModManagerScreenKey).WithMinHeight(72f));
+
+		SettingTab? modManagerTab = tabHost.GetSettingTab(ModManagerScreenKey);
+		if (modManagerTab == null)
+		{
+			GD.PrintErr($"[ReForge.Settings] Cannot find setting tab '{ModManagerScreenKey}'.");
+			return;
+		}
+
+		modManagerTab.Add(new ReForgeModManagerDashboard());
 	}
 
 	private static void OnDebugToggled(bool enabled)
