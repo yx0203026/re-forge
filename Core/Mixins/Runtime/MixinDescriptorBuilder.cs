@@ -36,6 +36,21 @@ public sealed record InjectionDescriptor(
 	string ConstantExpression
 );
 
+internal sealed record ValidatedShadowField(
+	FieldInfo MixinField,
+	string TargetName,
+	IReadOnlyList<string> Aliases,
+	bool Optional
+);
+
+public sealed record ShadowFieldDescriptor(
+	string DescriptorKey,
+	FieldInfo MixinField,
+	string TargetName,
+	IReadOnlyList<string> Aliases,
+	bool Optional
+);
+
 public sealed record MixinDescriptor(
 	string DescriptorKey,
 	string MixinId,
@@ -44,7 +59,13 @@ public sealed record MixinDescriptor(
 	int Priority,
 	bool StrictMode,
 	IReadOnlyList<InjectionDescriptor> Injections
-);
+)
+{
+	/// <summary>
+	/// 字段级映射描述，默认空集合以保持旧调用方兼容。
+	/// </summary>
+	public IReadOnlyList<ShadowFieldDescriptor> ShadowFields { get; init; } = Array.Empty<ShadowFieldDescriptor>();
+}
 
 public sealed class MixinScanResult
 {
@@ -95,7 +116,8 @@ internal sealed class MixinDescriptorBuilder
 	public MixinDescriptor Build(
 		Type mixinType,
 		global::ReForge.MixinAttribute mixinAttribute,
-		IReadOnlyList<ValidatedMixinInjection> validatedInjections)
+		IReadOnlyList<ValidatedMixinInjection> validatedInjections,
+		IReadOnlyList<ValidatedShadowField>? validatedShadowFields = null)
 	{
 		ArgumentNullException.ThrowIfNull(mixinType);
 		ArgumentNullException.ThrowIfNull(mixinAttribute);
@@ -112,6 +134,15 @@ internal sealed class MixinDescriptorBuilder
 			injections.Add(BuildInjection(mixinType, mixinAttribute.TargetType, validatedInjections[i]));
 		}
 
+		List<ShadowFieldDescriptor> shadowFields = new();
+		if (validatedShadowFields != null)
+		{
+			for (int i = 0; i < validatedShadowFields.Count; i++)
+			{
+				shadowFields.Add(BuildShadowField(mixinType, mixinAttribute.TargetType, validatedShadowFields[i]));
+			}
+		}
+
 		return new MixinDescriptor(
 			descriptorKey,
 			mixinId,
@@ -120,7 +151,12 @@ internal sealed class MixinDescriptorBuilder
 			mixinAttribute.Priority,
 			mixinAttribute.StrictMode,
 			new ReadOnlyCollection<InjectionDescriptor>(injections)
-		);
+		)
+		{
+			ShadowFields = shadowFields.Count == 0
+				? Array.Empty<ShadowFieldDescriptor>()
+				: new ReadOnlyCollection<ShadowFieldDescriptor>(shadowFields),
+		};
 	}
 
 	private static InjectionDescriptor BuildInjection(
@@ -158,5 +194,79 @@ internal sealed class MixinDescriptorBuilder
 			validated.ArgumentIndex,
 			validated.ConstantExpression
 		);
+	}
+
+	private static ShadowFieldDescriptor BuildShadowField(
+		Type mixinType,
+		Type targetType,
+		ValidatedShadowField validated)
+	{
+		ArgumentNullException.ThrowIfNull(mixinType);
+		ArgumentNullException.ThrowIfNull(targetType);
+		ArgumentNullException.ThrowIfNull(validated);
+
+		string targetName = string.IsNullOrWhiteSpace(validated.TargetName)
+			? string.Empty
+			: validated.TargetName.Trim();
+		IReadOnlyList<string> aliases = NormalizeAliases(validated.Aliases);
+
+		string descriptorKey = string.Concat(
+			mixinType.AssemblyQualifiedName,
+			":",
+			targetType.AssemblyQualifiedName,
+			":",
+			validated.MixinField.MetadataToken,
+			":",
+			targetName,
+			":",
+			BuildAliasKey(aliases),
+			":",
+			validated.Optional ? "1" : "0"
+		);
+
+		return new ShadowFieldDescriptor(
+			descriptorKey,
+			validated.MixinField,
+			targetName,
+			aliases,
+			validated.Optional
+		);
+	}
+
+	private static IReadOnlyList<string> NormalizeAliases(IReadOnlyList<string> aliases)
+	{
+		if (aliases.Count == 0)
+		{
+			return Array.Empty<string>();
+		}
+
+		List<string> normalized = new(aliases.Count);
+		for (int i = 0; i < aliases.Count; i++)
+		{
+			string? alias = aliases[i];
+			if (string.IsNullOrWhiteSpace(alias))
+			{
+				continue;
+			}
+
+			normalized.Add(alias.Trim());
+		}
+
+		if (normalized.Count == 0)
+		{
+			return Array.Empty<string>();
+		}
+
+		return new ReadOnlyCollection<string>(normalized);
+	}
+
+	private static string BuildAliasKey(IReadOnlyList<string> aliases)
+	{
+		if (aliases.Count == 0)
+		{
+			return string.Empty;
+		}
+
+		return string.Join("|", aliases);
 	}
 }

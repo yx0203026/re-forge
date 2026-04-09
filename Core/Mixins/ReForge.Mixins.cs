@@ -45,6 +45,13 @@ public static partial class ReForge
 				);
 			}
 
+			if (installResult.State == MixinLifecycleState.Failed || result.Summary.Failed > 0)
+			{
+				throw new InvalidOperationException(
+					$"Mixin registration failed. modId='{options.ModId}', strictMode={options.StrictMode}, installed={result.Summary.Installed}, failed={result.Summary.Failed}, skipped={result.Summary.Skipped}, state='{installResult.State}', message='{installResult.Message}'."
+				);
+			}
+
 			return result;
 		}
 

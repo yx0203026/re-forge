@@ -118,8 +118,8 @@ internal sealed class MixinDiagnostics
 				entry.Kind.ToString(),
 				entry.TargetMethod.DeclaringType?.FullName ?? "UnknownType",
 				entry.TargetMethod.Name,
-				entry.HandlerMethod.DeclaringType?.FullName ?? "UnknownType",
-				entry.HandlerMethod.Name,
+				entry.DeclaredHandlerMethod.DeclaringType?.FullName ?? "UnknownType",
+				entry.DeclaredHandlerMethod.Name,
 				entry.AppliedAtUtc
 			));
 		}

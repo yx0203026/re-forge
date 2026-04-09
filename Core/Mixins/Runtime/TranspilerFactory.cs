@@ -9,6 +9,11 @@ using HarmonyLib;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
+internal delegate IEnumerable<CodeInstruction> RuntimeTranspiler(
+	IEnumerable<CodeInstruction> instructions,
+	ILGenerator ilGenerator
+);
+
 /// <summary>
 /// Transpiler 工厂：为高级注入语义（ModifyArg / ModifyConstant / Redirect）生成 IL 操作方法。
 /// </summary>
@@ -25,13 +30,13 @@ internal sealed class TranspilerFactory
 	/// <param name="argumentIndex">要修改的参数索引（0-based）</param>
 	/// <param name="handlerMethod">处理方法：接收原参数值，返回修改后的值</param>
 	/// <param name="ordinal">匹配序号，-1 表示全部匹配</param>
-	public static Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> CreateModifyArgTranspiler(
+	public static RuntimeTranspiler CreateModifyArgTranspiler(
 		MethodBase? targetCallSite,
 		int argumentIndex,
 		MethodInfo handlerMethod,
 		int ordinal = -1)
 	{
-		return instructions =>
+		return (instructions, ilGenerator) =>
 		{
 			List<CodeInstruction> codes = instructions.ToList();
 			int matchCount = 0;
@@ -58,22 +63,17 @@ internal sealed class TranspilerFactory
 					continue;
 				}
 
-				// 检查参数索引是否合法
 				ParameterInfo[] parameters = calledMethod.GetParameters();
-				int effectiveIndex = argumentIndex;
-
-				// 实例方法调用时，参数栈上还有 this，需要调整
-				if (!calledMethod.IsStatic && calledMethod is MethodInfo)
-				{
-					// 对于实例方法，argumentIndex 0 是第一个参数，this 在更早的位置
-				}
-
-				if (effectiveIndex < 0 || effectiveIndex >= parameters.Length)
+				if (argumentIndex < 0 || argumentIndex >= parameters.Length)
 				{
 					continue;
 				}
 
-				// 检查 ordinal
+				if (parameters[argumentIndex].ParameterType.IsByRef)
+				{
+					continue;
+				}
+
 				if (ordinal >= 0 && matchCount != ordinal)
 				{
 					matchCount++;
@@ -81,25 +81,85 @@ internal sealed class TranspilerFactory
 				}
 
 				matchCount++;
+				List<CodeInstruction> rewritten = BuildModifyArgCallRewrite(
+					originalCall: code,
+					calledMethod,
+					argumentIndex,
+					handlerMethod,
+					ilGenerator
+				);
 
-				// 找到参数加载位置：向前回溯找到第 argumentIndex 个参数的加载指令
-				int argLoadIndex = FindArgumentLoadIndex(codes, i, parameters.Length, effectiveIndex);
-				if (argLoadIndex < 0)
+				if (rewritten.Count == 0)
 				{
 					continue;
 				}
 
-				// 在参数加载之后插入 handler 调用
-				// 原：ldarg.x / ldloc.x / ...
-				// 改：ldarg.x / ldloc.x / call handler
-				CodeInstruction callHandler = new(OpCodes.Call, handlerMethod);
-				callHandler.labels = new List<Label>(); // 保留原标签在原位置
-				codes.Insert(argLoadIndex + 1, callHandler);
-				i++; // 跳过新插入的指令
+				codes.RemoveAt(i);
+				codes.InsertRange(i, rewritten);
+				i += rewritten.Count - 1;
 			}
 
 			return codes;
 		};
+	}
+
+	private static List<CodeInstruction> BuildModifyArgCallRewrite(
+		CodeInstruction originalCall,
+		MethodBase calledMethod,
+		int argumentIndex,
+		MethodInfo handlerMethod,
+		ILGenerator ilGenerator)
+	{
+		ParameterInfo[] parameters = calledMethod.GetParameters();
+		bool hasInstance = calledMethod is MethodInfo methodInfo && !methodInfo.IsStatic;
+
+		if (hasInstance && calledMethod.DeclaringType != null && calledMethod.DeclaringType.IsValueType)
+		{
+			return new List<CodeInstruction>();
+		}
+
+		List<LocalBuilder> argumentLocals = new(parameters.Length);
+		for (int i = 0; i < parameters.Length; i++)
+		{
+			argumentLocals.Add(ilGenerator.DeclareLocal(parameters[i].ParameterType));
+		}
+
+		LocalBuilder? instanceLocal = null;
+		if (hasInstance)
+		{
+			instanceLocal = ilGenerator.DeclareLocal(calledMethod.DeclaringType ?? typeof(object));
+		}
+
+		List<CodeInstruction> replacement = new();
+		for (int i = parameters.Length - 1; i >= 0; i--)
+		{
+			replacement.Add(new CodeInstruction(OpCodes.Stloc, argumentLocals[i]));
+		}
+
+		if (instanceLocal != null)
+		{
+			replacement.Add(new CodeInstruction(OpCodes.Stloc, instanceLocal));
+			replacement.Add(new CodeInstruction(OpCodes.Ldloc, instanceLocal));
+		}
+
+		for (int i = 0; i < parameters.Length; i++)
+		{
+			replacement.Add(new CodeInstruction(OpCodes.Ldloc, argumentLocals[i]));
+			if (i == argumentIndex)
+			{
+				replacement.Add(new CodeInstruction(OpCodes.Call, handlerMethod));
+			}
+		}
+
+		replacement.Add(new CodeInstruction(originalCall.opcode, calledMethod));
+
+		if (replacement.Count > 0)
+		{
+			replacement[0].labels.AddRange(originalCall.labels);
+			replacement[0].blocks.AddRange(originalCall.blocks);
+		}
+
+		return replacement;
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════════════════════
@@ -112,15 +172,17 @@ internal sealed class TranspilerFactory
 	/// <param name="constantExpression">常量匹配表达式（如 "42"、"true"、"MyText"）</param>
 	/// <param name="handlerMethod">处理方法：接收原常量值，返回修改后的值</param>
 	/// <param name="ordinal">匹配序号，-1 表示全部匹配</param>
-	public static Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> CreateModifyConstantTranspiler(
+	public static RuntimeTranspiler CreateModifyConstantTranspiler(
 		string constantExpression,
 		MethodInfo handlerMethod,
-		int ordinal = -1)
+		int ordinal = -1,
+		bool requireMatch = true)
 	{
-		return instructions =>
+		return (instructions, _) =>
 		{
 			List<CodeInstruction> codes = instructions.ToList();
 			int matchCount = 0;
+			int appliedCount = 0;
 			object? targetConstant = ParseConstantExpression(constantExpression, handlerMethod.ReturnType);
 
 			for (int i = 0; i < codes.Count; i++)
@@ -152,6 +214,14 @@ internal sealed class TranspilerFactory
 				CodeInstruction callHandler = new(OpCodes.Call, handlerMethod);
 				codes.Insert(i + 1, callHandler);
 				i++; // 跳过新插入的指令
+				appliedCount++;
+			}
+
+			if (requireMatch && appliedCount == 0)
+			{
+				throw new InvalidOperationException(
+					$"ModifyConstant did not match any constants. expression='{constantExpression}', ordinal={ordinal}, handler='{handlerMethod.DeclaringType?.FullName}.{handlerMethod.Name}'."
+				);
 			}
 
 			return codes;
@@ -169,13 +239,13 @@ internal sealed class TranspilerFactory
 	/// <param name="handlerMethod">替换方法：签名应与原方法兼容</param>
 	/// <param name="at">调用点标识（如 "INVOKE:MethodName"）</param>
 	/// <param name="ordinal">匹配序号，-1 表示全部匹配</param>
-	public static Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> CreateRedirectTranspiler(
+	public static RuntimeTranspiler CreateRedirectTranspiler(
 		MethodBase targetCallSite,
 		MethodInfo handlerMethod,
 		string at,
 		int ordinal = -1)
 	{
-		return instructions =>
+		return (instructions, _) =>
 		{
 			List<CodeInstruction> codes = instructions.ToList();
 			int matchCount = 0;
@@ -321,50 +391,6 @@ internal sealed class TranspilerFactory
 		return true;
 	}
 
-	private static int FindArgumentLoadIndex(List<CodeInstruction> codes, int callIndex, int paramCount, int targetArgIndex)
-	{
-		// 简化实现：向前搜索，找到第 (paramCount - targetArgIndex - 1) 个参数加载点
-		// 这是一个近似实现，完整实现需要栈分析
-		int stackDepth = paramCount - targetArgIndex;
-		int depth = 0;
-
-		for (int i = callIndex - 1; i >= 0 && depth < stackDepth; i--)
-		{
-			CodeInstruction code = codes[i];
-
-			// 简单启发：检测常见的加载指令
-			if (IsLoadInstruction(code))
-			{
-				depth++;
-				if (depth == stackDepth)
-				{
-					return i;
-				}
-			}
-		}
-
-		return -1;
-	}
-
-	private static bool IsLoadInstruction(CodeInstruction code)
-	{
-		OpCode op = code.opcode;
-		return op == OpCodes.Ldarg || op == OpCodes.Ldarg_0 || op == OpCodes.Ldarg_1
-			|| op == OpCodes.Ldarg_2 || op == OpCodes.Ldarg_3 || op == OpCodes.Ldarg_S
-			|| op == OpCodes.Ldloc || op == OpCodes.Ldloc_0 || op == OpCodes.Ldloc_1
-			|| op == OpCodes.Ldloc_2 || op == OpCodes.Ldloc_3 || op == OpCodes.Ldloc_S
-			|| op == OpCodes.Ldc_I4 || op == OpCodes.Ldc_I4_0 || op == OpCodes.Ldc_I4_1
-			|| op == OpCodes.Ldc_I4_2 || op == OpCodes.Ldc_I4_3 || op == OpCodes.Ldc_I4_4
-			|| op == OpCodes.Ldc_I4_5 || op == OpCodes.Ldc_I4_6 || op == OpCodes.Ldc_I4_7
-			|| op == OpCodes.Ldc_I4_8 || op == OpCodes.Ldc_I4_M1 || op == OpCodes.Ldc_I4_S
-			|| op == OpCodes.Ldc_I8 || op == OpCodes.Ldc_R4 || op == OpCodes.Ldc_R8
-			|| op == OpCodes.Ldstr || op == OpCodes.Ldnull || op == OpCodes.Ldfld
-			|| op == OpCodes.Ldsfld || op == OpCodes.Ldelem || op == OpCodes.Ldelem_I
-			|| op == OpCodes.Ldelem_I1 || op == OpCodes.Ldelem_I2 || op == OpCodes.Ldelem_I4
-			|| op == OpCodes.Ldelem_I8 || op == OpCodes.Ldelem_R4 || op == OpCodes.Ldelem_R8
-			|| op == OpCodes.Ldelem_Ref || op == OpCodes.Ldelem_U1 || op == OpCodes.Ldelem_U2
-			|| op == OpCodes.Ldelem_U4;
-	}
 
 	private static bool TryGetConstantValue(CodeInstruction code, out object? value, out Type? type)
 	{

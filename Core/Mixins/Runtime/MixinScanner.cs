@@ -13,6 +13,9 @@ internal sealed class MixinScanner
 	private readonly object _syncRoot = new();
 	private readonly Dictionary<string, MixinScanResult> _scanCache = new(StringComparer.Ordinal);
 	private readonly HashSet<string> _registeredInjectionKeys = new(StringComparer.Ordinal);
+	private readonly HashSet<string> _registeredShadowKeys = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, HashSet<string>> _assemblyInjectionKeys = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, HashSet<string>> _assemblyShadowKeys = new(StringComparer.Ordinal);
 	private readonly MixinValidation _validation = new();
 	private readonly MixinDescriptorBuilder _descriptorBuilder = new();
 
@@ -35,6 +38,7 @@ internal sealed class MixinScanner
 		Type[] types = SafeGetTypes(assembly);
 		List<MixinDescriptor> descriptors = new();
 		List<MixinScanDiagnostic> diagnostics = new();
+		ResetRegisteredKeysForAssembly(cacheKey);
 
 		for (int i = 0; i < types.Length; i++)
 		{
@@ -44,7 +48,7 @@ internal sealed class MixinScanner
 				continue;
 			}
 
-			ScanType(type, descriptors, diagnostics);
+			ScanType(type, cacheKey, descriptors, diagnostics);
 		}
 
 		MixinScanResult result = new(
@@ -70,14 +74,61 @@ internal sealed class MixinScanner
 			{
 				_scanCache.Clear();
 				_registeredInjectionKeys.Clear();
+				_registeredShadowKeys.Clear();
+				_assemblyInjectionKeys.Clear();
+				_assemblyShadowKeys.Clear();
 				return;
 			}
 
-			_scanCache.Remove(BuildAssemblyCacheKey(assembly));
+			string cacheKey = BuildAssemblyCacheKey(assembly);
+			_scanCache.Remove(cacheKey);
+			if (_assemblyInjectionKeys.Remove(cacheKey, out HashSet<string>? assemblyKeys) && assemblyKeys != null)
+			{
+				foreach (string key in assemblyKeys)
+				{
+					_registeredInjectionKeys.Remove(key);
+				}
+			}
+
+			if (_assemblyShadowKeys.Remove(cacheKey, out HashSet<string>? assemblyShadowKeys) && assemblyShadowKeys != null)
+			{
+				foreach (string key in assemblyShadowKeys)
+				{
+					_registeredShadowKeys.Remove(key);
+				}
+			}
 		}
 	}
 
-	private void ScanType(Type mixinType, List<MixinDescriptor> descriptors, List<MixinScanDiagnostic> diagnostics)
+	private void ResetRegisteredKeysForAssembly(string cacheKey)
+	{
+		lock (_syncRoot)
+		{
+			if (!_assemblyInjectionKeys.Remove(cacheKey, out HashSet<string>? existingKeys) || existingKeys == null)
+			{
+				return;
+			}
+
+			foreach (string key in existingKeys)
+			{
+				_registeredInjectionKeys.Remove(key);
+			}
+
+			if (_assemblyShadowKeys.Remove(cacheKey, out HashSet<string>? existingShadowKeys) && existingShadowKeys != null)
+			{
+				foreach (string key in existingShadowKeys)
+				{
+					_registeredShadowKeys.Remove(key);
+				}
+			}
+		}
+	}
+
+	private void ScanType(
+		Type mixinType,
+		string assemblyCacheKey,
+		List<MixinDescriptor> descriptors,
+		List<MixinScanDiagnostic> diagnostics)
 	{
 		object[] mixinAttributes = mixinType.GetCustomAttributes(typeof(global::ReForge.MixinAttribute), inherit: false);
 		if (mixinAttributes.Length == 0)
@@ -99,12 +150,13 @@ internal sealed class MixinScanner
 				continue;
 			}
 
-			List<ValidatedMixinInjection> validatedInjections = ScanInjectionMethods(mixinType, mixinAttribute, diagnostics);
-			if (validatedInjections.Count == 0)
+			List<ValidatedMixinInjection> validatedInjections = ScanInjectionMethods(mixinType, mixinAttribute, assemblyCacheKey, diagnostics);
+			List<ValidatedShadowField> validatedShadowFields = ScanShadowFields(mixinType, mixinAttribute, assemblyCacheKey, diagnostics);
+			if (validatedInjections.Count == 0 && validatedShadowFields.Count == 0)
 			{
 				RecordWarning(
 					diagnostics,
-					$"Mixin has no valid injection methods. mixinType='{mixinType.FullName}', targetType='{mixinAttribute.TargetType.FullName}'.",
+					$"Mixin has no valid injection methods or shadow fields. mixinType='{mixinType.FullName}', targetType='{mixinAttribute.TargetType.FullName}'.",
 					mixinType,
 					handlerMethod: null,
 					attribute: null
@@ -112,7 +164,7 @@ internal sealed class MixinScanner
 				continue;
 			}
 
-			MixinDescriptor descriptor = _descriptorBuilder.Build(mixinType, mixinAttribute, validatedInjections);
+			MixinDescriptor descriptor = _descriptorBuilder.Build(mixinType, mixinAttribute, validatedInjections, validatedShadowFields);
 			descriptors.Add(descriptor);
 		}
 	}
@@ -120,6 +172,7 @@ internal sealed class MixinScanner
 	private List<ValidatedMixinInjection> ScanInjectionMethods(
 		Type mixinType,
 		global::ReForge.MixinAttribute mixinAttribute,
+		string assemblyCacheKey,
 		List<MixinScanDiagnostic> diagnostics)
 	{
 		MethodInfo[] methods = mixinType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
@@ -193,6 +246,14 @@ internal sealed class MixinScanner
 						);
 						continue;
 					}
+
+					if (!_assemblyInjectionKeys.TryGetValue(assemblyCacheKey, out HashSet<string>? assemblyKeys) || assemblyKeys == null)
+					{
+						assemblyKeys = new HashSet<string>(StringComparer.Ordinal);
+						_assemblyInjectionKeys[assemblyCacheKey] = assemblyKeys;
+					}
+
+					assemblyKeys.Add(dedupKey);
 				}
 
 				validatedInjections.Add(validated);
@@ -200,6 +261,100 @@ internal sealed class MixinScanner
 		}
 
 		return validatedInjections;
+	}
+
+	private List<ValidatedShadowField> ScanShadowFields(
+		Type mixinType,
+		global::ReForge.MixinAttribute mixinAttribute,
+		string assemblyCacheKey,
+		List<MixinScanDiagnostic> diagnostics)
+	{
+		FieldInfo[] fields = mixinType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+		List<ValidatedShadowField> validatedShadows = new();
+		HashSet<string> localDedupKeys = new(StringComparer.Ordinal);
+
+		for (int i = 0; i < fields.Length; i++)
+		{
+			FieldInfo mixinField = fields[i];
+			object[] attributes = mixinField.GetCustomAttributes(typeof(global::ReForge.ShadowAttribute), inherit: false);
+			if (attributes.Length == 0)
+			{
+				continue;
+			}
+
+			for (int j = 0; j < attributes.Length; j++)
+			{
+				global::ReForge.ShadowAttribute? shadowAttribute = attributes[j] as global::ReForge.ShadowAttribute;
+				if (shadowAttribute == null)
+				{
+					continue;
+				}
+
+				if (!_validation.TryValidateShadowField(
+						mixinType,
+						mixinField,
+						shadowAttribute,
+						mixinAttribute.TargetType,
+						out ValidatedShadowField? validated,
+						out string error))
+				{
+					RecordError(diagnostics, error, mixinType, handlerMethod: null, attribute: null);
+					continue;
+				}
+
+				if (validated == null)
+				{
+					RecordError(
+						diagnostics,
+						$"Shadow validation returned null result. mixinType='{mixinType.FullName}', targetType='{mixinAttribute.TargetType.FullName}', member='{mixinField.Name}'.",
+						mixinType,
+						handlerMethod: null,
+						attribute: null
+					);
+					continue;
+				}
+
+				string dedupKey = BuildShadowDedupKey(mixinType, mixinAttribute.TargetType, validated);
+				if (!localDedupKeys.Add(dedupKey))
+				{
+					RecordWarning(
+						diagnostics,
+						$"Duplicate shadow declaration ignored in mixin scope. key='{dedupKey}'.",
+						mixinType,
+						handlerMethod: null,
+						attribute: null
+					);
+					continue;
+				}
+
+				lock (_syncRoot)
+				{
+					if (!_registeredShadowKeys.Add(dedupKey))
+					{
+						RecordWarning(
+							diagnostics,
+							$"Duplicate shadow declaration ignored globally. key='{dedupKey}'.",
+							mixinType,
+							handlerMethod: null,
+							attribute: null
+						);
+						continue;
+					}
+
+					if (!_assemblyShadowKeys.TryGetValue(assemblyCacheKey, out HashSet<string>? assemblyShadowKeys) || assemblyShadowKeys == null)
+					{
+						assemblyShadowKeys = new HashSet<string>(StringComparer.Ordinal);
+						_assemblyShadowKeys[assemblyCacheKey] = assemblyShadowKeys;
+					}
+
+					assemblyShadowKeys.Add(dedupKey);
+				}
+
+				validatedShadows.Add(validated);
+			}
+		}
+
+		return validatedShadows;
 	}
 
 	private static string BuildAssemblyCacheKey(Assembly assembly)
@@ -238,6 +393,21 @@ internal sealed class MixinScanner
 			attribute.TargetMethod,
 			":",
 			attribute.Ordinal
+		);
+	}
+
+	private static string BuildShadowDedupKey(Type mixinType, Type targetType, ValidatedShadowField validated)
+	{
+		return string.Concat(
+			mixinType.AssemblyQualifiedName,
+			":",
+			targetType.AssemblyQualifiedName,
+			":",
+			validated.MixinField.MetadataToken,
+			":",
+			validated.TargetName,
+			":",
+			validated.Optional ? "1" : "0"
 		);
 	}
 

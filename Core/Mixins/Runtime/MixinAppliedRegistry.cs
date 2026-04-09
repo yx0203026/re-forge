@@ -14,7 +14,8 @@ public sealed record MixinAppliedEntry(
 	InjectionKind Kind,
 	string HarmonyId,
 	MethodBase TargetMethod,
-	MethodInfo HandlerMethod,
+	MethodInfo AppliedPatchMethod,
+	MethodInfo DeclaredHandlerMethod,
 	DateTimeOffset AppliedAtUtc
 );
 

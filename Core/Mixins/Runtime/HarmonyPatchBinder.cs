@@ -19,7 +19,17 @@ public sealed record MixinPatchApplyRecord(
 	bool Success,
 	string Message,
 	MixinConflictResolution? ConflictResolution,
-	MethodBase? PatchedTarget
+	MethodBase? PatchedTarget,
+	MethodInfo? AppliedPatchMethod
+);
+
+public sealed record ShadowBindRecord(
+	string ShadowDescriptorKey,
+	string MixinMemberName,
+	string TargetMemberName,
+	bool Success,
+	bool Optional,
+	string Message
 );
 
 public sealed class MixinPatchBindResult
@@ -30,7 +40,11 @@ public sealed class MixinPatchBindResult
 		int failed,
 		int skipped,
 		bool abortedByStrictMode,
-		IReadOnlyList<MixinPatchApplyRecord> records)
+		IReadOnlyList<MixinPatchApplyRecord> records,
+		int shadowInstalled = 0,
+		int shadowFailed = 0,
+		int shadowSkipped = 0,
+		IReadOnlyList<ShadowBindRecord>? shadowRecords = null)
 	{
 		ArgumentNullException.ThrowIfNull(mixinId);
 		ArgumentNullException.ThrowIfNull(records);
@@ -41,6 +55,10 @@ public sealed class MixinPatchBindResult
 		Skipped = skipped;
 		AbortedByStrictMode = abortedByStrictMode;
 		Records = records;
+		ShadowInstalled = shadowInstalled;
+		ShadowFailed = shadowFailed;
+		ShadowSkipped = shadowSkipped;
+		ShadowRecords = shadowRecords ?? Array.Empty<ShadowBindRecord>();
 	}
 
 	public string MixinId { get; }
@@ -54,6 +72,14 @@ public sealed class MixinPatchBindResult
 	public bool AbortedByStrictMode { get; }
 
 	public IReadOnlyList<MixinPatchApplyRecord> Records { get; }
+
+	public int ShadowInstalled { get; }
+
+	public int ShadowFailed { get; }
+
+	public int ShadowSkipped { get; }
+
+	public IReadOnlyList<ShadowBindRecord> ShadowRecords { get; }
 }
 
 internal sealed class HarmonyPatchBinder
@@ -78,13 +104,45 @@ internal sealed class HarmonyPatchBinder
 		int installed = 0;
 		int failed = 0;
 		int skipped = 0;
+		int shadowInstalled = 0;
+		int shadowFailed = 0;
+		int shadowSkipped = 0;
 		bool abortedByStrictMode = false;
 		List<MixinPatchApplyRecord> records = new(descriptor.Injections.Count);
+		List<ShadowBindRecord> shadowRecords = descriptor.ShadowFields.Count == 0
+			? new List<ShadowBindRecord>()
+			: new List<ShadowBindRecord>(descriptor.ShadowFields.Count);
 		List<InjectionDescriptor> orderedInjections = new(descriptor.Injections);
 		orderedInjections.Sort(static (a, b) => string.CompareOrdinal(a.DescriptorKey, b.DescriptorKey));
 
+		if (descriptor.ShadowFields.Count > 0)
+		{
+			TryBindShadowFields(
+				descriptor,
+				out shadowInstalled,
+				out shadowFailed,
+				out shadowSkipped,
+				out bool shadowStrictAbort,
+				shadowRecords
+			);
+
+			if (shadowStrictAbort)
+			{
+				abortedByStrictMode = true;
+			}
+
+			GD.Print(
+				$"[ReForge.Mixins] Shadow binding summary. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', installed={shadowInstalled}, failed={shadowFailed}, skipped={shadowSkipped}, strictAbort={shadowStrictAbort}."
+			);
+		}
+
 		for (int i = 0; i < orderedInjections.Count; i++)
 		{
+			if (abortedByStrictMode)
+			{
+				break;
+			}
+
 			InjectionDescriptor injection = orderedInjections[i];
 			if (!TryMapPatchKind(injection.Kind, out PatchSlot patchSlot))
 			{
@@ -101,7 +159,8 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					skipMessage,
 					ConflictResolution: MixinConflictResolution.Skip,
-					PatchedTarget: null
+					PatchedTarget: null,
+					AppliedPatchMethod: null
 				));
 				continue;
 			}
@@ -126,7 +185,8 @@ internal sealed class HarmonyPatchBinder
 						Success: false,
 						optionalSkipMessage,
 						ConflictResolution: MixinConflictResolution.Skip,
-						PatchedTarget: null
+						PatchedTarget: null,
+						AppliedPatchMethod: null
 					));
 					continue;
 				}
@@ -142,7 +202,8 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					resolveError,
 					ConflictResolution: MixinConflictResolution.Fail,
-					PatchedTarget: null
+					PatchedTarget: null,
+					AppliedPatchMethod: null
 				));
 
 				if (descriptor.StrictMode)
@@ -169,7 +230,8 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					nullTargetError,
 					ConflictResolution: MixinConflictResolution.Fail,
-					PatchedTarget: null
+					PatchedTarget: null,
+					AppliedPatchMethod: null
 				));
 
 				if (descriptor.StrictMode)
@@ -207,7 +269,8 @@ internal sealed class HarmonyPatchBinder
 						Success: false,
 						message,
 						ConflictResolution: MixinConflictResolution.Skip,
-						PatchedTarget: targetMethod
+						PatchedTarget: targetMethod,
+						AppliedPatchMethod: null
 					));
 					continue;
 				}
@@ -224,7 +287,8 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					failMessage,
 					ConflictResolution: MixinConflictResolution.Fail,
-					PatchedTarget: targetMethod
+					PatchedTarget: targetMethod,
+					AppliedPatchMethod: null
 				));
 
 				if (descriptor.StrictMode)
@@ -262,7 +326,8 @@ internal sealed class HarmonyPatchBinder
 						Success: false,
 						message,
 						ConflictResolution: MixinConflictResolution.Skip,
-						PatchedTarget: targetMethod
+						PatchedTarget: targetMethod,
+						AppliedPatchMethod: null
 					));
 					continue;
 				}
@@ -271,7 +336,7 @@ internal sealed class HarmonyPatchBinder
 				{
 					try
 					{
-						harmony.Unpatch(conflictEntry.TargetMethod, conflictEntry.HandlerMethod);
+						harmony.Unpatch(conflictEntry.TargetMethod, conflictEntry.AppliedPatchMethod);
 						_appliedRegistry.UnregisterByInjectionKey(conflictEntry.InjectionDescriptorKey);
 						GD.Print($"[ReForge.Mixins] {decision.Reason} Action='overwrite'. existingInjectionKey='{conflictEntry.InjectionDescriptorKey}'.");
 					}
@@ -290,7 +355,8 @@ internal sealed class HarmonyPatchBinder
 							Success: false,
 							overwriteError,
 							ConflictResolution: MixinConflictResolution.Overwrite,
-							PatchedTarget: targetMethod
+							PatchedTarget: targetMethod,
+							AppliedPatchMethod: null
 						));
 
 						if (descriptor.StrictMode)
@@ -316,7 +382,8 @@ internal sealed class HarmonyPatchBinder
 						Success: false,
 						message,
 						ConflictResolution: MixinConflictResolution.Fail,
-						PatchedTarget: targetMethod
+						PatchedTarget: targetMethod,
+						AppliedPatchMethod: null
 					));
 
 					if (descriptor.StrictMode)
@@ -350,7 +417,37 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					buildError,
 					ConflictResolution: MixinConflictResolution.Fail,
-					PatchedTarget: targetMethod
+					PatchedTarget: targetMethod,
+					AppliedPatchMethod: null
+				));
+
+				if (descriptor.StrictMode)
+				{
+					abortedByStrictMode = true;
+					break;
+				}
+
+				continue;
+			}
+
+			MethodInfo? appliedPatchMethod = ResolveAppliedPatchMethod(injection.Kind, prefix, postfix, transpiler, finalizer);
+			if (appliedPatchMethod == null)
+			{
+				failed++;
+				string noPatchMethodError =
+					$"Patch method resolution failed. mixin='{descriptor.MixinType.FullName}', kind='{injection.Kind}', targetType='{targetMethod.DeclaringType?.FullName}', method='{targetMethod.Name}', descriptorKey='{injection.DescriptorKey}'.";
+				GD.PrintErr($"[ReForge.Mixins] {noPatchMethodError}");
+				records.Add(new MixinPatchApplyRecord(
+					injection.DescriptorKey,
+					injection.Kind,
+					conflictKey,
+					descriptor.TargetType.FullName ?? descriptor.TargetType.Name,
+					targetMethod.Name,
+					Success: false,
+					noPatchMethodError,
+					ConflictResolution: MixinConflictResolution.Fail,
+					PatchedTarget: targetMethod,
+					AppliedPatchMethod: null
 				));
 
 				if (descriptor.StrictMode)
@@ -376,6 +473,7 @@ internal sealed class HarmonyPatchBinder
 					injection.Kind,
 					harmony.Id,
 					targetMethod,
+					appliedPatchMethod,
 					injection.HandlerMethod,
 					DateTimeOffset.UtcNow
 				));
@@ -389,7 +487,8 @@ internal sealed class HarmonyPatchBinder
 					Success: true,
 					successMessage,
 					ConflictResolution: null,
-					PatchedTarget: targetMethod
+					PatchedTarget: targetMethod,
+					AppliedPatchMethod: appliedPatchMethod
 				));
 			}
 			catch (Exception exception)
@@ -407,7 +506,8 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					installError,
 					ConflictResolution: MixinConflictResolution.Fail,
-					PatchedTarget: targetMethod
+					PatchedTarget: targetMethod,
+					AppliedPatchMethod: appliedPatchMethod
 				));
 
 				if (descriptor.StrictMode)
@@ -433,7 +533,8 @@ internal sealed class HarmonyPatchBinder
 					Success: false,
 					"Skipped due to strict-mode abort after previous failure.",
 					ConflictResolution: MixinConflictResolution.Skip,
-					PatchedTarget: null
+					PatchedTarget: null,
+					AppliedPatchMethod: null
 				));
 			}
 
@@ -446,13 +547,23 @@ internal sealed class HarmonyPatchBinder
 			failed,
 			skipped,
 			abortedByStrictMode,
-			new ReadOnlyCollection<MixinPatchApplyRecord>(records)
+			new ReadOnlyCollection<MixinPatchApplyRecord>(records),
+			shadowInstalled,
+			shadowFailed,
+			shadowSkipped,
+			new ReadOnlyCollection<ShadowBindRecord>(shadowRecords)
 		);
 	}
 
 	public IReadOnlyList<MixinAppliedEntry> GetAppliedEntries()
 	{
 		return _appliedRegistry.Snapshot();
+	}
+
+	public bool TryGetAppliedEntry(string injectionDescriptorKey, out MixinAppliedEntry? entry)
+	{
+		ArgumentNullException.ThrowIfNull(injectionDescriptorKey);
+		return _appliedRegistry.TryGetByInjectionKey(injectionDescriptorKey, out entry);
 	}
 
 	public int RemoveAppliedByHarmonyId(string harmonyId)
@@ -480,6 +591,220 @@ internal sealed class HarmonyPatchBinder
 		}
 
 		return removed;
+	}
+
+	private static void TryBindShadowFields(
+		MixinDescriptor descriptor,
+		out int installed,
+		out int failed,
+		out int skipped,
+		out bool abortedByStrictMode,
+		List<ShadowBindRecord> records)
+	{
+		ArgumentNullException.ThrowIfNull(descriptor);
+		ArgumentNullException.ThrowIfNull(records);
+
+		installed = 0;
+		failed = 0;
+		skipped = 0;
+		abortedByStrictMode = false;
+
+		List<ShadowFieldDescriptor> orderedShadows = new(descriptor.ShadowFields);
+		orderedShadows.Sort(static (a, b) => string.CompareOrdinal(a.DescriptorKey, b.DescriptorKey));
+
+		for (int i = 0; i < orderedShadows.Count; i++)
+		{
+			ShadowFieldDescriptor shadow = orderedShadows[i];
+			if (!TryResolveShadowTargetField(descriptor, shadow, out FieldInfo? targetField, out string resolvedTargetName, out string error))
+			{
+				if (shadow.Optional)
+				{
+					skipped++;
+					string skipMessage =
+						$"Optional shadow skipped (target field not found). mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', target='{shadow.TargetName}', aliases='{BuildAliasText(shadow.Aliases)}'.";
+					GD.Print($"[ReForge.Mixins] {skipMessage}");
+					records.Add(new ShadowBindRecord(
+						shadow.DescriptorKey,
+						shadow.MixinField.Name,
+						resolvedTargetName,
+						Success: false,
+						Optional: true,
+						skipMessage
+					));
+					continue;
+				}
+
+				failed++;
+				string failMessage =
+					$"Shadow binding failed. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', target='{shadow.TargetName}', aliases='{BuildAliasText(shadow.Aliases)}'. {error}";
+				GD.PrintErr($"[ReForge.Mixins] {failMessage}");
+				records.Add(new ShadowBindRecord(
+					shadow.DescriptorKey,
+					shadow.MixinField.Name,
+					resolvedTargetName,
+					Success: false,
+					Optional: false,
+					failMessage
+				));
+
+				if (descriptor.StrictMode)
+				{
+					abortedByStrictMode = true;
+					break;
+				}
+
+				continue;
+			}
+
+			if (targetField == null)
+			{
+				failed++;
+				string nullFieldMessage =
+					$"Shadow resolver returned null unexpectedly. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', target='{shadow.TargetName}'.";
+				GD.PrintErr($"[ReForge.Mixins] {nullFieldMessage}");
+				records.Add(new ShadowBindRecord(
+					shadow.DescriptorKey,
+					shadow.MixinField.Name,
+					resolvedTargetName,
+					Success: false,
+					Optional: shadow.Optional,
+					nullFieldMessage
+				));
+
+				if (descriptor.StrictMode)
+				{
+					abortedByStrictMode = true;
+					break;
+				}
+
+				continue;
+			}
+
+			try
+			{
+				shadow.MixinField.SetValue(obj: null, value: targetField);
+				installed++;
+				string successMessage =
+					$"Shadow bound. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', target='{targetField.Name}', descriptorKey='{shadow.DescriptorKey}'.";
+				GD.Print($"[ReForge.Mixins] {successMessage}");
+				records.Add(new ShadowBindRecord(
+					shadow.DescriptorKey,
+					shadow.MixinField.Name,
+					targetField.Name,
+					Success: true,
+					Optional: shadow.Optional,
+					successMessage
+				));
+			}
+			catch (Exception exception)
+			{
+				failed++;
+				string bindError =
+					$"Shadow assignment failed. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', target='{targetField.Name}', descriptorKey='{shadow.DescriptorKey}'. {exception}";
+				GD.PrintErr($"[ReForge.Mixins] {bindError}");
+				records.Add(new ShadowBindRecord(
+					shadow.DescriptorKey,
+					shadow.MixinField.Name,
+					targetField.Name,
+					Success: false,
+					Optional: shadow.Optional,
+					bindError
+				));
+
+				if (descriptor.StrictMode)
+				{
+					abortedByStrictMode = true;
+					break;
+				}
+			}
+		}
+	}
+
+	private static bool TryResolveShadowTargetField(
+		MixinDescriptor descriptor,
+		ShadowFieldDescriptor shadow,
+		out FieldInfo? targetField,
+		out string resolvedTargetName,
+		out string error)
+	{
+		ArgumentNullException.ThrowIfNull(descriptor);
+		ArgumentNullException.ThrowIfNull(shadow);
+
+		targetField = null;
+		resolvedTargetName = string.Empty;
+		error = string.Empty;
+
+		List<string> candidates = BuildShadowCandidates(shadow);
+		if (candidates.Count == 0)
+		{
+			error = "No shadow target candidates after normalization.";
+			return false;
+		}
+
+		const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+		FieldInfo[] targetFields = descriptor.TargetType.GetFields(Flags);
+
+		for (int i = 0; i < candidates.Count; i++)
+		{
+			string candidate = candidates[i];
+			for (int j = 0; j < targetFields.Length; j++)
+			{
+				FieldInfo field = targetFields[j];
+				if (!string.Equals(field.Name, candidate, StringComparison.Ordinal))
+				{
+					continue;
+				}
+
+				resolvedTargetName = candidate;
+				targetField = field;
+				return true;
+			}
+		}
+
+		resolvedTargetName = candidates[0];
+		error =
+			$"Target field not found. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', candidates='{string.Join("|", candidates)}'.";
+		return false;
+	}
+
+	private static List<string> BuildShadowCandidates(ShadowFieldDescriptor shadow)
+	{
+		HashSet<string> dedup = new(StringComparer.Ordinal);
+		List<string> candidates = new();
+
+		AddCandidate(candidates, dedup, shadow.TargetName);
+		for (int i = 0; i < shadow.Aliases.Count; i++)
+		{
+			AddCandidate(candidates, dedup, shadow.Aliases[i]);
+		}
+
+		return candidates;
+	}
+
+	private static void AddCandidate(List<string> candidates, HashSet<string> dedup, string? candidate)
+	{
+		if (string.IsNullOrWhiteSpace(candidate))
+		{
+			return;
+		}
+
+		string trimmed = candidate.Trim();
+		if (!dedup.Add(trimmed))
+		{
+			return;
+		}
+
+		candidates.Add(trimmed);
+	}
+
+	private static string BuildAliasText(IReadOnlyList<string> aliases)
+	{
+		if (aliases.Count == 0)
+		{
+			return string.Empty;
+		}
+
+		return string.Join("|", aliases);
 	}
 
 	private static bool TryMapPatchKind(InjectionKind kind, out PatchSlot patchSlot)
@@ -511,6 +836,26 @@ internal sealed class HarmonyPatchBinder
 				patchSlot = default;
 				return false;
 		}
+	}
+
+	private static MethodInfo? ResolveAppliedPatchMethod(
+		InjectionKind kind,
+		HarmonyMethod? prefix,
+		HarmonyMethod? postfix,
+		HarmonyMethod? transpiler,
+		HarmonyMethod? finalizer)
+	{
+		return kind switch
+		{
+			InjectionKind.InjectPrefix => prefix?.method,
+			InjectionKind.InjectPostfix => postfix?.method,
+			InjectionKind.InjectFinalizer => finalizer?.method,
+			InjectionKind.Overwrite => prefix?.method,
+			InjectionKind.ModifyArg => transpiler?.method,
+			InjectionKind.ModifyConstant => transpiler?.method,
+			InjectionKind.Redirect => transpiler?.method,
+			_ => null,
+		};
 	}
 
 	// ════════════════════════════════════════════════════════════════════════════════════════════
@@ -640,7 +985,7 @@ internal sealed class HarmonyPatchBinder
 			int ordinal = injection.Ordinal;
 
 			// 创建 Transpiler 委托
-			Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> transpilerFunc =
+			RuntimeTranspiler transpilerFunc =
 				TranspilerFactory.CreateModifyArgTranspiler(
 					targetCallSite: null, // 匹配所有调用点
 					argumentIndex: argIndex,
@@ -685,11 +1030,12 @@ internal sealed class HarmonyPatchBinder
 			int ordinal = injection.Ordinal;
 
 			// 创建 Transpiler 委托
-			Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> transpilerFunc =
+			RuntimeTranspiler transpilerFunc =
 				TranspilerFactory.CreateModifyConstantTranspiler(
 					constantExpression: constantExpr,
 					handlerMethod: handlerMethod,
-					ordinal: ordinal
+					ordinal: ordinal,
+					requireMatch: !injection.Optional
 				);
 
 			// 将委托包装为静态方法供 Harmony 使用
@@ -730,7 +1076,7 @@ internal sealed class HarmonyPatchBinder
 			int ordinal = injection.Ordinal;
 
 			// 创建 Transpiler 委托
-			Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> transpilerFunc =
+			RuntimeTranspiler transpilerFunc =
 				TranspilerFactory.CreateRedirectTranspiler(
 					targetCallSite: targetMethod,
 					handlerMethod: handlerMethod,
@@ -754,25 +1100,71 @@ internal sealed class HarmonyPatchBinder
 	// Transpiler 包装器：将委托转换为 Harmony 可用的静态方法
 	// ════════════════════════════════════════════════════════════════════════════════════════════
 
-	private static readonly Dictionary<string, TranspilerHolder> _transpilerCache = new(StringComparer.Ordinal);
+	private static readonly Dictionary<string, RuntimeTranspiler> _transpilerCache = new(StringComparer.Ordinal);
+	private static readonly Dictionary<string, MethodInfo> _transpilerMethodCache = new(StringComparer.Ordinal);
 	private static readonly object _transpilerCacheLock = new();
+	private static int _transpilerWrapperCounter;
 
 	private static MethodInfo CreateTranspilerWrapper(
-		Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> transpilerFunc,
+		RuntimeTranspiler transpilerFunc,
 		string uniqueKey)
 	{
 		lock (_transpilerCacheLock)
 		{
-			// 缓存 holder 以保持委托存活
 			string safeKey = SanitizeKey(uniqueKey);
-			if (!_transpilerCache.TryGetValue(safeKey, out TranspilerHolder? holder))
+			_transpilerCache[safeKey] = transpilerFunc;
+
+			if (!_transpilerMethodCache.TryGetValue(safeKey, out MethodInfo? method))
 			{
-				holder = new TranspilerHolder(transpilerFunc);
-				_transpilerCache[safeKey] = holder;
+				method = BuildTranspilerDispatchMethod(safeKey);
+				_transpilerMethodCache[safeKey] = method;
 			}
 
-			return holder.TranspilerMethod;
+			return method;
 		}
+	}
+
+	private static MethodInfo BuildTranspilerDispatchMethod(string safeKey)
+	{
+		MethodInfo dispatcher = typeof(HarmonyPatchBinder).GetMethod(
+			nameof(InvokeCachedTranspiler),
+			BindingFlags.Static | BindingFlags.NonPublic
+		)!;
+
+		int id = System.Threading.Interlocked.Increment(ref _transpilerWrapperCounter);
+		DynamicMethod dynamicMethod = new(
+			$"TranspilerWrapper_{id}",
+			typeof(IEnumerable<CodeInstruction>),
+			new[] { typeof(IEnumerable<CodeInstruction>), typeof(ILGenerator) },
+			typeof(HarmonyPatchBinder).Module,
+			skipVisibility: true
+		);
+
+		ILGenerator il = dynamicMethod.GetILGenerator();
+		il.Emit(OpCodes.Ldarg_0);
+		il.Emit(OpCodes.Ldarg_1);
+		il.Emit(OpCodes.Ldstr, safeKey);
+		il.Emit(OpCodes.Call, dispatcher);
+		il.Emit(OpCodes.Ret);
+
+		return dynamicMethod;
+	}
+
+	private static IEnumerable<CodeInstruction> InvokeCachedTranspiler(
+		IEnumerable<CodeInstruction> instructions,
+		ILGenerator ilGenerator,
+		string cacheKey)
+	{
+		RuntimeTranspiler? transpiler;
+		lock (_transpilerCacheLock)
+		{
+			if (!_transpilerCache.TryGetValue(cacheKey, out transpiler) || transpiler == null)
+			{
+				throw new InvalidOperationException($"Transpiler delegate not found. key='{cacheKey}'.");
+			}
+		}
+
+		return transpiler(instructions, ilGenerator);
 	}
 
 	private static string SanitizeKey(string key)
@@ -788,51 +1180,6 @@ internal sealed class HarmonyPatchBinder
 		}
 
 		return new string(chars);
-	}
-
-	/// <summary>
-	/// 持有 Transpiler 委托的容器类，通过实例方法桥接到 Harmony。
-	/// </summary>
-	private sealed class TranspilerHolder
-	{
-		private static int _counter;
-		private readonly Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> _transpiler;
-
-		public TranspilerHolder(Func<IEnumerable<CodeInstruction>, IEnumerable<CodeInstruction>> transpiler)
-		{
-			_transpiler = transpiler ?? throw new ArgumentNullException(nameof(transpiler));
-
-			// 创建动态方法作为 Harmony transpiler 入口
-			int id = System.Threading.Interlocked.Increment(ref _counter);
-			DynamicMethod dm = new(
-				$"TranspilerWrapper_{id}",
-				typeof(IEnumerable<CodeInstruction>),
-				new[] { typeof(IEnumerable<CodeInstruction>) },
-				typeof(TranspilerHolder).Module,
-				skipVisibility: true
-			);
-
-			ILGenerator il = dm.GetILGenerator();
-
-			// 获取当前 holder 实例的 Invoke 方法
-			MethodInfo invokeMethod = typeof(TranspilerHolder).GetMethod(
-				nameof(Invoke),
-				BindingFlags.Instance | BindingFlags.NonPublic
-			)!;
-
-			// 加载 this（通过闭包捕获）
-			// 由于 DynamicMethod 无法直接捕获 this，我们使用静态字段存储
-			// 改用更简单的方案：直接返回 Invoke 方法
-			TranspilerMethod = invokeMethod;
-		}
-
-		public MethodInfo TranspilerMethod { get; }
-
-		[System.Diagnostics.CodeAnalysis.SuppressMessage("CodeQuality", "IDE0051", Justification = "Called via reflection")]
-		private IEnumerable<CodeInstruction> Invoke(IEnumerable<CodeInstruction> instructions)
-		{
-			return _transpiler(instructions);
-		}
 	}
 
 	private readonly record struct PatchSlot(string SlotName, PatchSlotType SlotType);

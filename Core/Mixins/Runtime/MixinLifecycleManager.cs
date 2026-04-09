@@ -83,6 +83,9 @@ internal sealed class MixinLifecycleManager
 			int installed = 0;
 			int failed = 0;
 			int skipped = 0;
+			int shadowInstalled = 0;
+			int shadowFailed = 0;
+			int shadowSkipped = 0;
 			bool abortedByStrictMode = false;
 			List<AppliedPatchHandle> appliedHandles = new();
 
@@ -122,29 +125,41 @@ internal sealed class MixinLifecycleManager
 				installed += bindResult.Installed;
 				failed += bindResult.Failed;
 				skipped += bindResult.Skipped;
+				shadowInstalled += bindResult.ShadowInstalled;
+				shadowFailed += bindResult.ShadowFailed;
+				shadowSkipped += bindResult.ShadowSkipped;
 				abortedByStrictMode |= bindResult.AbortedByStrictMode;
 
-				Dictionary<string, MethodInfo> injectionHandlerMap = BuildInjectionHandlerMap(descriptor);
 				for (int j = 0; j < bindResult.Records.Count; j++)
 				{
 					MixinPatchApplyRecord record = bindResult.Records[j];
-					if (!record.Success || record.PatchedTarget == null)
+					if (!record.Success || record.PatchedTarget == null || record.AppliedPatchMethod == null)
 					{
 						continue;
 					}
 
-					if (!injectionHandlerMap.TryGetValue(record.InjectionDescriptorKey, out MethodInfo? handlerMethod) || handlerMethod == null)
-					{
-						continue;
-					}
-
-					appliedHandles.Add(new AppliedPatchHandle(record.InjectionDescriptorKey, record.PatchedTarget, handlerMethod));
+					appliedHandles.Add(new AppliedPatchHandle(record.InjectionDescriptorKey, record.PatchedTarget, record.AppliedPatchMethod));
 				}
 
 				if (options.StrictMode && (bindResult.AbortedByStrictMode || bindResult.Failed > 0))
 				{
 					abortedByStrictMode = true;
 					break;
+				}
+			}
+
+			int rollbackFailures = 0;
+			int rollbackRemoved = 0;
+			if (options.StrictMode && (abortedByStrictMode || failed > 0) && appliedHandles.Count > 0)
+			{
+				rollbackFailures = RollbackAppliedHandles(modId, options.Harmony, appliedHandles, out rollbackRemoved);
+				if (rollbackFailures == 0)
+				{
+					installed = 0;
+				}
+				else
+				{
+					installed = Math.Max(0, installed - rollbackRemoved);
 				}
 			}
 
@@ -157,11 +172,11 @@ internal sealed class MixinLifecycleManager
 				Skipped: skipped,
 				ScannerErrors: scannerErrors,
 				ScannerWarnings: scannerWarnings,
-				UnpatchFailures: 0
+				UnpatchFailures: rollbackFailures
 			);
 
 			string finalMessage =
-				$"Install completed. modId='{modId}', installed={installed}, failed={failed}, skipped={skipped}, scannerErrors={scannerErrors}, strict={options.StrictMode}.";
+				$"Install completed. modId='{modId}', installed={installed}, failed={failed}, skipped={skipped}, shadowInstalled={shadowInstalled}, shadowFailed={shadowFailed}, shadowSkipped={shadowSkipped}, scannerErrors={scannerErrors}, strict={options.StrictMode}, rollbackRemoved={rollbackRemoved}, rollbackFailures={rollbackFailures}.";
 			if (finalState == MixinLifecycleState.Failed)
 			{
 				GD.PrintErr($"[ReForge.Mixins] {finalMessage}");
@@ -273,7 +288,7 @@ internal sealed class MixinLifecycleManager
 					throw new InvalidOperationException($"HarmonyId is empty for mod '{modId}'.");
 				}
 
-				harmony.Unpatch(handle.TargetMethod, handle.HandlerMethod);
+				harmony.Unpatch(handle.TargetMethod, handle.AppliedPatchMethod);
 				removedKeys.Add(handle.InjectionDescriptorKey);
 				removedCount++;
 			}
@@ -366,16 +381,39 @@ internal sealed class MixinLifecycleManager
 		return _binder.GetAppliedEntries();
 	}
 
-	private static Dictionary<string, MethodInfo> BuildInjectionHandlerMap(MixinDescriptor descriptor)
+	private int RollbackAppliedHandles(
+		string modId,
+		HarmonyLib.Harmony harmony,
+		List<AppliedPatchHandle> handles,
+		out int removedCount)
 	{
-		Dictionary<string, MethodInfo> map = new(StringComparer.Ordinal);
-		for (int i = 0; i < descriptor.Injections.Count; i++)
+		removedCount = 0;
+		int rollbackFailures = 0;
+		HashSet<string> removedKeys = new(StringComparer.Ordinal);
+
+		for (int i = handles.Count - 1; i >= 0; i--)
 		{
-			InjectionDescriptor injection = descriptor.Injections[i];
-			map[injection.DescriptorKey] = injection.HandlerMethod;
+			AppliedPatchHandle handle = handles[i];
+			try
+			{
+				harmony.Unpatch(handle.TargetMethod, handle.AppliedPatchMethod);
+				removedKeys.Add(handle.InjectionDescriptorKey);
+				removedCount++;
+			}
+			catch (Exception exception)
+			{
+				rollbackFailures++;
+				GD.PrintErr($"[ReForge.Mixins] Strict rollback unpatch failed but was isolated. modId='{modId}', injectionKey='{handle.InjectionDescriptorKey}'. {exception}");
+			}
 		}
 
-		return map;
+		if (removedKeys.Count > 0)
+		{
+			_binder.RemoveAppliedByInjectionKeys(new ReadOnlyCollection<string>(new List<string>(removedKeys)));
+			handles.RemoveAll(handle => removedKeys.Contains(handle.InjectionDescriptorKey));
+		}
+
+		return rollbackFailures;
 	}
 
 	private static int CountSeverity(IReadOnlyList<MixinScanDiagnostic> diagnostics, MixinScanDiagnosticSeverity severity)
@@ -486,6 +524,6 @@ internal sealed class MixinLifecycleManager
 	private sealed record AppliedPatchHandle(
 		string InjectionDescriptorKey,
 		MethodBase TargetMethod,
-		MethodInfo HandlerMethod
+		MethodInfo AppliedPatchMethod
 	);
 }
