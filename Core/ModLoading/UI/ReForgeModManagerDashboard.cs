@@ -2,8 +2,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Helpers;
 using ReForgeFramework.UI.Abstractions;
@@ -16,24 +18,43 @@ namespace ReForgeFramework.ModLoading.UI;
 
 internal sealed partial class ReForgeModManagerDashboard : UiElement
 {
+	private readonly bool _devMode;
+
+	internal ReForgeModManagerDashboard(bool devMode = false)
+	{
+		_devMode = devMode;
+	}
+
 	protected override Control CreateControl()
 	{
-		return new RuntimeDashboard();
+		return new RuntimeDashboard(_devMode);
 	}
 
 	private sealed partial class RuntimeDashboard : MarginContainer
 	{
+		private readonly bool _devMode;
 		private readonly Dictionary<string, ModRowView> _rowsById = new(StringComparer.OrdinalIgnoreCase);
 
 		private VBoxContainer _rowsContainer = null!;
 		private RichTextLabel _summaryLabel = null!;
 		private RichTextLabel _detailsLabel = null!;
 		private RichTextLabel _pendingLabel = null!;
+		private VBoxContainer _devModsRowsContainer = null!;
+		private RichTextLabel _devModsSummaryLabel = null!;
+		private RichTextLabel _devBuildStatusLabel = null!;
 		private CanvasLayer _createModDialogLayer = null!;
 		private Control _createModDialogOverlay = null!;
 		private LineEdit _createModNameInput = null!;
+		private LineEdit _createModAuthorInput = null!;
+		private LineEdit _createModVersionInput = null!;
 		private RichTextLabel _createModDialogMessage = null!;
+		private bool _devBuildRunning;
 		private string? _selectedModId;
+
+		internal RuntimeDashboard(bool devMode)
+		{
+			_devMode = devMode;
+		}
 
 		/// <summary>
 		/// Initializes the runtime dashboard layout and binds localization refresh callbacks.
@@ -65,7 +86,7 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 		{
 			Name = "ReForgeModManagerDashboard";
 			SizeFlagsHorizontal = SizeFlags.ExpandFill;
-			SizeFlagsVertical = SizeFlags.ExpandFill;
+			SizeFlagsVertical = SizeFlags.ShrinkBegin;
 			CustomMinimumSize = new Vector2(0f, 680f);
 			AddThemeConstantOverride("margin_left", 10);
 			AddThemeConstantOverride("margin_top", 10);
@@ -76,7 +97,7 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 			{
 				Name = "Root",
 				SizeFlagsHorizontal = SizeFlags.ExpandFill,
-				SizeFlagsVertical = SizeFlags.ExpandFill
+				SizeFlagsVertical = SizeFlags.ShrinkBegin
 			};
 			root.AddThemeConstantOverride("separation", 10);
 			AddChild(root);
@@ -90,9 +111,11 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 			titleRow.AddThemeConstantOverride("separation", 8);
 			root.AddChild(titleRow);
 
+			string titleFallback = _devMode ? "[gold]My Mods (Dev)[/gold]" : "[gold]Mod Manager[/gold]";
+			string titleLocKey = _devMode ? "REFORGE.MOD_MANAGER.DEV_DASHBOARD_TITLE" : "REFORGE.MOD_MANAGER.TITLE";
 			RichTextLabel titleLabel = BuildStaticText(
-				fallbackText: "[gold]Mod Manager[/gold]",
-				locKey: "REFORGE.MOD_MANAGER.TITLE",
+				fallbackText: titleFallback,
+				locKey: titleLocKey,
 				minHeight: 56f);
 			titleLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 			titleRow.AddChild(titleLabel);
@@ -111,13 +134,25 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 				locKey: "REFORGE.MOD_MANAGER.ALLOW_LOADING",
 				minHeight: 52f);
 			agreementLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+			agreementLabel.Visible = !_devMode;
 			agreementRow.AddChild(agreementLabel);
+
+			if (_devMode)
+			{
+				RichTextLabel devHintLabel = BuildStaticText(
+					fallbackText: "[gold]Manage development mods and build in game[/gold]",
+					locKey: "REFORGE.MOD_MANAGER.DEV_DASHBOARD_HINT",
+					minHeight: 52f);
+				devHintLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+				agreementRow.AddChild(devHintLabel);
+			}
 
 			Control agreementTick = new TickBox(
 				initialChecked: ReForgeModManager.GetPersistedSettings().PlayerAgreedToModLoading,
 				onToggled: OnAgreementToggled)
 				.Build();
 			agreementTick.CustomMinimumSize = new Vector2(52f, 52f);
+			agreementTick.Visible = !_devMode;
 			agreementRow.AddChild(agreementTick);
 
 			Godot.Button refreshButton = BuildButton(
@@ -134,48 +169,90 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 				onPressed: OpenCreateModDialog,
 				preset: UiButtonStylePreset.OfficialConfirm,
 				minimumSize: new Vector2(240f, 42f));
+			createNewModButton.Visible = _devMode;
 			agreementRow.AddChild(createNewModButton);
 
 			_summaryLabel = BuildDynamicText(minHeight: 64f, minWidth: 0f, bbcodeEnabled: true);
 			_summaryLabel.AddThemeColorOverride("default_color", StsColors.cream);
+			_summaryLabel.Visible = !_devMode;
 			root.AddChild(_summaryLabel);
 
 			HSplitContainer split = new()
 			{
 				Name = "Split",
 				SizeFlagsHorizontal = SizeFlags.ExpandFill,
-				SizeFlagsVertical = SizeFlags.ExpandFill
+				SizeFlagsVertical = SizeFlags.ShrinkBegin,
+				CustomMinimumSize = new Vector2(0f, 420f)
 			};
 			split.SplitOffset = 520;
 			root.AddChild(split);
 
-			PanelContainer listPanel = BuildSectionPanel("Installed Mods", "REFORGE.MOD_MANAGER.INSTALLED_MODS_TITLE");
-			listPanel.CustomMinimumSize = new Vector2(520f, 420f);
-			split.AddChild(listPanel);
+			PanelContainer leftPanel = BuildSectionPanel(
+				_devMode ? "My Mods (Dev)" : "Installed Mods",
+				_devMode ? "REFORGE.MOD_MANAGER.DEV_MODS_TITLE" : "REFORGE.MOD_MANAGER.INSTALLED_MODS_TITLE");
+			leftPanel.CustomMinimumSize = new Vector2(520f, 420f);
+			split.AddChild(leftPanel);
 
-			PanelContainer detailsPanel = BuildSectionPanel("Mod Details", "REFORGE.MOD_MANAGER.DETAILS_TITLE");
+			PanelContainer detailsPanel = BuildSectionPanel(
+				_devMode ? "Build Output" : "Mod Details",
+				_devMode ? "REFORGE.MOD_MANAGER.DEV_BUILD_OUTPUT_TITLE" : "REFORGE.MOD_MANAGER.DETAILS_TITLE");
 			detailsPanel.CustomMinimumSize = new Vector2(520f, 420f);
 			split.AddChild(detailsPanel);
 
-			_rowsContainer = new VBoxContainer
+			if (!_devMode)
 			{
-				Name = "Rows",
-				SizeFlagsHorizontal = SizeFlags.ExpandFill,
-				SizeFlagsVertical = SizeFlags.ShrinkBegin
-			};
-			_rowsContainer.AddThemeConstantOverride("separation", 12);
+				_rowsContainer = new VBoxContainer
+				{
+					Name = "Rows",
+					SizeFlagsHorizontal = SizeFlags.ExpandFill,
+					SizeFlagsVertical = SizeFlags.ShrinkBegin
+				};
+				_rowsContainer.AddThemeConstantOverride("separation", 12);
 
-			ScrollContainer listScroll = new()
+				ScrollContainer listScroll = new()
+				{
+					Name = "RowsScroll",
+					SizeFlagsHorizontal = SizeFlags.ExpandFill,
+					SizeFlagsVertical = SizeFlags.ExpandFill,
+					FollowFocus = true,
+					HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+					VerticalScrollMode = ScrollContainer.ScrollMode.Auto
+				};
+				listScroll.AddChild(_rowsContainer);
+				GetSectionBody(leftPanel).AddChild(listScroll);
+			}
+			else
 			{
-				Name = "RowsScroll",
-				SizeFlagsHorizontal = SizeFlags.ExpandFill,
-				SizeFlagsVertical = SizeFlags.ExpandFill,
-				FollowFocus = true,
-				HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
-				VerticalScrollMode = ScrollContainer.ScrollMode.Auto
-			};
-			listScroll.AddChild(_rowsContainer);
-			GetSectionBody(listPanel).AddChild(listScroll);
+				VBoxContainer myModsBody = GetSectionBody(leftPanel);
+
+				_devModsSummaryLabel = BuildDynamicText(minHeight: 38f, minWidth: 0f, bbcodeEnabled: false);
+				_devModsSummaryLabel.AddThemeColorOverride("default_color", StsColors.halfTransparentCream);
+				myModsBody.AddChild(_devModsSummaryLabel);
+
+				ScrollContainer devRowsScroll = new()
+				{
+					Name = "DevRowsScroll",
+					SizeFlagsHorizontal = SizeFlags.ExpandFill,
+					SizeFlagsVertical = SizeFlags.ExpandFill,
+					HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+					VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+					FollowFocus = true
+				};
+
+				_devModsRowsContainer = new VBoxContainer
+				{
+					Name = "DevRows",
+					SizeFlagsHorizontal = SizeFlags.ExpandFill,
+					SizeFlagsVertical = SizeFlags.ShrinkBegin
+				};
+				_devModsRowsContainer.AddThemeConstantOverride("separation", 8);
+				devRowsScroll.AddChild(_devModsRowsContainer);
+				myModsBody.AddChild(devRowsScroll);
+
+				_devBuildStatusLabel = BuildDynamicText(minHeight: 38f, minWidth: 0f, bbcodeEnabled: false);
+				_devBuildStatusLabel.AddThemeColorOverride("default_color", StsColors.cream);
+				myModsBody.AddChild(_devBuildStatusLabel);
+			}
 
 			_detailsLabel = BuildDynamicText(minHeight: 420f, minWidth: 520f, bbcodeEnabled: false);
 			_detailsLabel.AddThemeColorOverride("default_color", StsColors.cream);
@@ -207,9 +284,13 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 			_pendingLabel = BuildDynamicText(minHeight: 40f, minWidth: 0f, bbcodeEnabled: false);
 			_pendingLabel.HorizontalAlignment = HorizontalAlignment.Center;
 			_pendingLabel.AddThemeColorOverride("default_color", new Color(1f, 0.333333f, 0.333333f, 1f));
+			_pendingLabel.Visible = !_devMode;
 			root.AddChild(_pendingLabel);
 
-			BuildCreateModDialog();
+			if (_devMode)
+			{
+				BuildCreateModDialog();
+			}
 		}
 
 		private void BuildCreateModDialog()
@@ -285,7 +366,7 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 			PanelContainer panel = new()
 			{
 				Name = "DialogPanel",
-				CustomMinimumSize = new Vector2(680f, 280f),
+				CustomMinimumSize = new Vector2(680f, 420f),
 				MouseFilter = MouseFilterEnum.Stop,
 				SizeFlagsHorizontal = SizeFlags.ShrinkCenter,
 				SizeFlagsVertical = SizeFlags.ShrinkCenter
@@ -330,8 +411,32 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 				ClearButtonEnabled = true
 			};
 			ApplyDialogInputStyle(_createModNameInput);
-			_createModNameInput.TextSubmitted += _ => ConfirmCreateMod();
+			_createModNameInput.TextSubmitted += _ => _createModAuthorInput.GrabFocus();
 			body.AddChild(_createModNameInput);
+
+			_createModAuthorInput = new LineEdit
+			{
+				Name = "CreateModAuthorInput",
+				PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_AUTHOR_PLACEHOLDER", "Input mod author..."),
+				CustomMinimumSize = new Vector2(0f, 48f),
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				ClearButtonEnabled = true
+			};
+			ApplyDialogInputStyle(_createModAuthorInput);
+			_createModAuthorInput.TextSubmitted += _ => _createModVersionInput.GrabFocus();
+			body.AddChild(_createModAuthorInput);
+
+			_createModVersionInput = new LineEdit
+			{
+				Name = "CreateModVersionInput",
+				PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_VERSION_PLACEHOLDER", "Input mod version..."),
+				CustomMinimumSize = new Vector2(0f, 48f),
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				ClearButtonEnabled = true
+			};
+			ApplyDialogInputStyle(_createModVersionInput);
+			_createModVersionInput.TextSubmitted += _ => ConfirmCreateMod();
+			body.AddChild(_createModVersionInput);
 
 			_createModDialogMessage = BuildDynamicText(minHeight: 42f, minWidth: 0f, bbcodeEnabled: false);
 			_createModDialogMessage.AddThemeColorOverride("default_color", StsColors.red);
@@ -373,6 +478,10 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 
 			_createModNameInput.PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_PLACEHOLDER", "Input mod name...");
 			_createModNameInput.Text = string.Empty;
+			_createModAuthorInput.PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_AUTHOR_PLACEHOLDER", "Input mod author...");
+			_createModAuthorInput.Text = string.Empty;
+			_createModVersionInput.PlaceholderText = T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_VERSION_PLACEHOLDER", "Input mod version...");
+			_createModVersionInput.Text = string.Empty;
 			SetCreateModDialogMessage(string.Empty, isError: false);
 			_createModDialogLayer.Visible = true;
 			_createModNameInput.GrabFocus();
@@ -391,6 +500,8 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 		private void ConfirmCreateMod()
 		{
 			string modName = _createModNameInput.Text?.Trim() ?? string.Empty;
+			string modAuthor = _createModAuthorInput.Text?.Trim() ?? string.Empty;
+			string modVersion = _createModVersionInput.Text?.Trim() ?? string.Empty;
 			if (string.IsNullOrWhiteSpace(modName))
 			{
 				SetCreateModDialogMessage(
@@ -399,7 +510,23 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 				return;
 			}
 
-			if (!ReForgeModManager.TryCreateDevModProject(modName, out string createdPath, out string errorMessage))
+			if (string.IsNullOrWhiteSpace(modAuthor))
+			{
+				SetCreateModDialogMessage(
+					T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_EMPTY_AUTHOR", "Please input a valid mod author."),
+					isError: true);
+				return;
+			}
+
+			if (string.IsNullOrWhiteSpace(modVersion))
+			{
+				SetCreateModDialogMessage(
+					T("REFORGE.MOD_MANAGER.CREATE_MOD_DIALOG_EMPTY_VERSION", "Please input a valid mod version."),
+					isError: true);
+				return;
+			}
+
+			if (!ReForgeModManager.TryCreateDevModProject(modName, modAuthor, modVersion, out string createdPath, out string errorMessage))
 			{
 				SetCreateModDialogMessage(SanitizeText(errorMessage), isError: true);
 				return;
@@ -635,6 +762,12 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 
 		private void Refresh(bool preserveSelection)
 		{
+			if (_devMode)
+			{
+				RefreshDevMods();
+				return;
+			}
+
 			List<ReForgeModContext> mods = ReForgeModManager
 				.GetAllMods()
 				.OrderBy(static mod => mod.Manifest.Name ?? mod.ModId, StringComparer.OrdinalIgnoreCase)
@@ -681,6 +814,329 @@ internal sealed partial class ReForgeModManagerDashboard : UiElement
 			}
 
 			SelectMod(targetModId, diagnostics);
+		}
+
+		private void RefreshDevMods()
+		{
+			if (!GodotObject.IsInstanceValid(_devModsRowsContainer)
+				|| !GodotObject.IsInstanceValid(_devModsSummaryLabel)
+				|| !GodotObject.IsInstanceValid(_devBuildStatusLabel))
+			{
+				return;
+			}
+
+			foreach (Node child in _devModsRowsContainer.GetChildren())
+			{
+				child.QueueFree();
+			}
+
+			IReadOnlyList<ReForgeDevModProject> projects = ReForgeModManager.GetDevModProjects();
+			string devRoot = ReForgeModManager.GetDevModsRootPath();
+			if (string.IsNullOrWhiteSpace(devRoot))
+			{
+				devRoot = "<unknown>";
+			}
+
+			_devModsSummaryLabel.Text = string.Format(
+				T("REFORGE.MOD_MANAGER.DEV_MODS_SUMMARY", "Dev root: {0} | Projects: {1}"),
+				SanitizeText(devRoot),
+				projects.Count);
+
+			if (projects.Count == 0)
+			{
+				RichTextLabel emptyLabel = BuildDynamicText(minHeight: 52f, minWidth: 0f, bbcodeEnabled: false);
+				emptyLabel.AddThemeColorOverride("default_color", StsColors.gray);
+				emptyLabel.Text = T(
+					"REFORGE.MOD_MANAGER.DEV_MODS_EMPTY",
+					"No development mods were found under the dev directory.");
+				_devModsRowsContainer.AddChild(emptyLabel);
+				return;
+			}
+
+			foreach (ReForgeDevModProject project in projects)
+			{
+				Control row = BuildDevProjectRow(project);
+				_devModsRowsContainer.AddChild(row);
+			}
+		}
+
+		private Control BuildDevProjectRow(ReForgeDevModProject project)
+		{
+			PanelContainer rowRoot = new()
+			{
+				Name = "DevMod_" + project.ModName,
+				CustomMinimumSize = new Vector2(0f, 126f),
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				MouseFilter = MouseFilterEnum.Pass
+			};
+
+			StyleBoxFlat rowStyle = new()
+			{
+				BgColor = new Color(0.043137f, 0.07451f, 0.113725f, 0.44f),
+				BorderColor = new Color(0.168627f, 0.25098f, 0.309804f, 1f),
+				BorderWidthLeft = 1,
+				BorderWidthTop = 1,
+				BorderWidthRight = 1,
+				BorderWidthBottom = 1,
+				CornerRadiusBottomLeft = 2,
+				CornerRadiusBottomRight = 2,
+				CornerRadiusTopLeft = 2,
+				CornerRadiusTopRight = 2
+			};
+			rowRoot.AddThemeStyleboxOverride("panel", rowStyle);
+
+			MarginContainer contentMargin = new()
+			{
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				SizeFlagsVertical = SizeFlags.ExpandFill
+			};
+			contentMargin.AddThemeConstantOverride("margin_left", 12);
+			contentMargin.AddThemeConstantOverride("margin_right", 12);
+			contentMargin.AddThemeConstantOverride("margin_top", 6);
+			contentMargin.AddThemeConstantOverride("margin_bottom", 6);
+			rowRoot.AddChild(contentMargin);
+
+			HBoxContainer rowContent = new()
+			{
+				SizeFlagsHorizontal = SizeFlags.ExpandFill,
+				SizeFlagsVertical = SizeFlags.ExpandFill,
+				Alignment = BoxContainer.AlignmentMode.Begin
+			};
+			rowContent.AddThemeConstantOverride("separation", 10);
+			contentMargin.AddChild(rowContent);
+
+			RichTextLabel infoLabel = BuildDynamicText(minHeight: 72f, minWidth: 0f, bbcodeEnabled: true);
+			infoLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+			infoLabel.AddThemeColorOverride("default_color", StsColors.cream);
+			infoLabel.Text = BuildDevProjectRowText(project);
+			rowContent.AddChild(infoLabel);
+
+			VBoxContainer actionColumn = new()
+			{
+				SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
+				SizeFlagsVertical = SizeFlags.ShrinkCenter
+			};
+			actionColumn.AddThemeConstantOverride("separation", 6);
+			rowContent.AddChild(actionColumn);
+
+			Godot.Button buildButton = BuildButton(
+				fallbackText: "Build",
+				locKey: "REFORGE.MOD_MANAGER.DEV_MODS_BUILD_BUTTON",
+				onPressed: () => StartBuildDevProject(project),
+				preset: UiButtonStylePreset.OfficialConfirm,
+				minimumSize: new Vector2(132f, 38f));
+			buildButton.Disabled = _devBuildRunning || !project.HasProjectFile || !project.HasManifestFile;
+			actionColumn.AddChild(buildButton);
+
+			Godot.Button reloadButton = BuildButton(
+				fallbackText: "Reload",
+				locKey: "REFORGE.MOD_MANAGER.DEV_MODS_RELOAD_BUTTON",
+				onPressed: () => ReloadDevProject(project),
+				preset: UiButtonStylePreset.OfficialConfirm,
+				minimumSize: new Vector2(132f, 34f));
+			reloadButton.Disabled = _devBuildRunning || !project.HasManifestFile;
+			actionColumn.AddChild(reloadButton);
+
+			Godot.Button uninstallButton = BuildButton(
+				fallbackText: "Uninstall",
+				locKey: "REFORGE.MOD_MANAGER.DEV_MODS_UNINSTALL_BUTTON",
+				onPressed: () => UninstallDevProject(project),
+				preset: UiButtonStylePreset.OfficialBack,
+				minimumSize: new Vector2(132f, 34f));
+			uninstallButton.Disabled = _devBuildRunning;
+			actionColumn.AddChild(uninstallButton);
+
+			rowRoot.GuiInput += input =>
+			{
+				if (input is not InputEventMouseButton mouseButton
+					|| mouseButton.ButtonIndex != MouseButton.Left
+					|| !mouseButton.Pressed)
+				{
+					return;
+				}
+
+				_detailsLabel.Text = BuildDevProjectDetailsText(project);
+			};
+
+			return rowRoot;
+		}
+
+		private void StartBuildDevProject(ReForgeDevModProject project)
+		{
+			if (_devBuildRunning)
+			{
+				SetDevBuildStatus(
+					T("REFORGE.MOD_MANAGER.DEV_MODS_BUILD_BUSY", "Another build is running, please wait."),
+					isError: true);
+				return;
+			}
+
+			if (!project.HasProjectFile || string.IsNullOrWhiteSpace(project.ProjectFilePath))
+			{
+				SetDevBuildStatus(
+					T("REFORGE.MOD_MANAGER.DEV_MODS_PROJECT_MISSING", "This development mod has no .csproj file."),
+					isError: true);
+				return;
+			}
+
+			_devBuildRunning = true;
+			SetDevBuildStatus(
+				string.Format(
+					T("REFORGE.MOD_MANAGER.DEV_MODS_BUILD_RUNNING", "Building '{0}' ..."),
+					project.ModName),
+				isError: false);
+
+			Task.Run(() =>
+			{
+				ReForgeDevBuildResult result = ReForgeModManager.BuildDevModProject(project.ProjectFilePath!);
+				Callable.From(() =>
+				{
+					if (!GodotObject.IsInstanceValid(this))
+					{
+						return;
+					}
+
+					ApplyDevBuildResult(project, result);
+				}).CallDeferred();
+			});
+		}
+
+		private void ApplyDevBuildResult(ReForgeDevModProject project, ReForgeDevBuildResult result)
+		{
+			_devBuildRunning = false;
+
+			string statusText = result.Succeeded
+				? string.Format(T("REFORGE.MOD_MANAGER.DEV_MODS_BUILD_SUCCESS", "Build succeeded: {0}"), project.ModName)
+				: string.Format(T("REFORGE.MOD_MANAGER.DEV_MODS_BUILD_FAILED", "Build failed: {0}"), project.ModName);
+
+			SetDevBuildStatus(statusText, isError: !result.Succeeded);
+
+			StringBuilder details = new();
+			details.AppendLine(statusText);
+			details.AppendLine(new string('-', 44));
+			details.AppendLine(result.Summary);
+			details.AppendLine();
+			details.AppendLine(result.Output);
+			_detailsLabel.Text = details.ToString();
+
+			RefreshDevMods();
+		}
+
+		private void ReloadDevProject(ReForgeDevModProject project)
+		{
+			ReForgeModRuntimeActionResult result = ReForgeModManager.ReloadDevModProject(project.ModDirectory);
+			ApplyDevRuntimeActionResult(project, result, "REFORGE.MOD_MANAGER.DEV_MODS_RELOAD");
+		}
+
+		private void UninstallDevProject(ReForgeDevModProject project)
+		{
+			ReForgeModRuntimeActionResult result = ReForgeModManager.UninstallDevModProject(project.ModDirectory);
+			ApplyDevRuntimeActionResult(project, result, "REFORGE.MOD_MANAGER.DEV_MODS_UNINSTALL");
+		}
+
+		private void ApplyDevRuntimeActionResult(ReForgeDevModProject project, ReForgeModRuntimeActionResult result, string actionKey)
+		{
+			string actionText = actionKey switch
+			{
+				"REFORGE.MOD_MANAGER.DEV_MODS_RELOAD" => T("REFORGE.MOD_MANAGER.DEV_MODS_RELOAD", "Reload"),
+				"REFORGE.MOD_MANAGER.DEV_MODS_UNINSTALL" => T("REFORGE.MOD_MANAGER.DEV_MODS_UNINSTALL", "Uninstall"),
+				_ => T("REFORGE.MOD_MANAGER.DEV_MODS_ACTION", "Action")
+			};
+
+			string statusText;
+			if (result.Succeeded)
+			{
+				statusText = string.Format(
+					T("REFORGE.MOD_MANAGER.DEV_MODS_ACTION_SUCCESS", "{0} succeeded: {1}"),
+					actionText,
+					project.ModName);
+			}
+			else
+			{
+				statusText = string.Format(
+					T("REFORGE.MOD_MANAGER.DEV_MODS_ACTION_FAILED", "{0} failed: {1}"),
+					actionText,
+					project.ModName);
+			}
+
+			if (result.RequiresRestart)
+			{
+				statusText += " " + T(
+					"REFORGE.MOD_MANAGER.DEV_MODS_RESTART_REQUIRED",
+					"Restart required to fully apply changes.");
+			}
+
+			SetDevBuildStatus(statusText, isError: !result.Succeeded);
+
+			StringBuilder details = new();
+			details.AppendLine(statusText);
+			details.AppendLine(new string('-', 44));
+			details.AppendLine(result.Summary);
+			if (!string.IsNullOrWhiteSpace(result.Details))
+			{
+				details.AppendLine();
+				details.AppendLine(result.Details);
+			}
+
+			_detailsLabel.Text = details.ToString();
+			RefreshDevMods();
+		}
+
+		private void SetDevBuildStatus(string text, bool isError)
+		{
+			if (!GodotObject.IsInstanceValid(_devBuildStatusLabel))
+			{
+				return;
+			}
+
+			_devBuildStatusLabel.Text = SanitizeText(text);
+			_devBuildStatusLabel.AddThemeColorOverride(
+				"default_color",
+				isError ? StsColors.red : StsColors.cream);
+		}
+
+		private string BuildDevProjectRowText(ReForgeDevModProject project)
+		{
+			string entryStatus = project.HasModMainFile
+				? T("REFORGE.MOD_MANAGER.DEV_MODS_ENTRY_READY", "ModMain.cs ready")
+				: T("REFORGE.MOD_MANAGER.DEV_MODS_ENTRY_MISSING", "ModMain.cs missing");
+
+			string projectStatus = project.HasProjectFile
+				? Path.GetFileName(project.ProjectFilePath) ?? "*.csproj"
+				: T("REFORGE.MOD_MANAGER.DEV_MODS_PROJECT_MISSING", "No .csproj found");
+
+			string manifestStatus = project.HasManifestFile
+				? Path.GetFileName(project.ManifestFilePath) ?? "*.json"
+				: T("REFORGE.MOD_MANAGER.DEV_MODS_MANIFEST_MISSING", "No manifest json found");
+
+			string resourceStatus = project.HasResourceDirectory
+				? T("REFORGE.MOD_MANAGER.DEV_MODS_RESOURCE_READY", "Resource directory ready")
+				: T("REFORGE.MOD_MANAGER.DEV_MODS_RESOURCE_MISSING", "Resource directory missing");
+
+			return
+				$"[b]{EscapeBbCode(project.ModName)}[/b]\n" +
+				$"[color=#D0CAB8]{EscapeBbCode(entryStatus)}  |  {EscapeBbCode(resourceStatus)}[/color]\n" +
+				$"[color=#A8C8E8]{EscapeBbCode(projectStatus)}  |  {EscapeBbCode(manifestStatus)}[/color]";
+		}
+
+		private string BuildDevProjectDetailsText(ReForgeDevModProject project)
+		{
+			StringBuilder builder = new();
+			builder.AppendLine(project.ModName);
+			builder.AppendLine(new string('-', 44));
+			builder.Append(SanitizeText(T("REFORGE.MOD_MANAGER.DETAIL_PATH", "Path"))).Append(": ")
+				.AppendLine(SanitizeText(project.ModDirectory));
+			builder.Append(SanitizeText(T("REFORGE.MOD_MANAGER.DEV_MODS_PROJECT_FILE", "Project"))).Append(": ")
+				.AppendLine(SanitizeText(project.ProjectFilePath ?? "<missing>"));
+			builder.Append(SanitizeText(T("REFORGE.MOD_MANAGER.DEV_MODS_MANIFEST_FILE", "Manifest"))).Append(": ")
+				.AppendLine(SanitizeText(project.ManifestFilePath ?? "<missing>"));
+			builder.Append(SanitizeText(T("REFORGE.MOD_MANAGER.DEV_MODS_ENTRY_STATUS", "Entry"))).Append(": ")
+				.AppendLine(project.HasModMainFile ? "ModMain.cs" : "<missing>");
+			builder.Append(SanitizeText(T("REFORGE.MOD_MANAGER.DEV_MODS_RESOURCE_STATUS", "Resource"))).Append(": ")
+				.AppendLine(project.HasResourceDirectory ? "OK" : "<missing>");
+			builder.Append(SanitizeText(T("REFORGE.MOD_MANAGER.DEV_MODS_LAST_MODIFIED", "Last Modified"))).Append(": ")
+				.AppendLine(project.LastModifiedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+			return builder.ToString();
 		}
 
 		private ModRowView BuildRow(ReForgeModContext mod, ReForgeModSettings settings)

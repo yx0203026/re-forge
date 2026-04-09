@@ -2,13 +2,16 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Godot;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Modding;
+using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Saves;
 using ReForgeFramework.ModResources;
 
@@ -79,10 +82,17 @@ public static class ReForgeModManager
 	/// 在游戏根目录的 dev 子目录下创建一个新的模组 C# 项目脚手架。
 	/// </summary>
 	/// <param name="modName">用户输入的模组名称，将作为目录名与项目名。</param>
+	/// <param name="author">用户输入的模组作者。</param>
+	/// <param name="version">用户输入的模组版本号。</param>
 	/// <param name="createdProjectPath">创建成功时输出项目目录路径。</param>
 	/// <param name="errorMessage">创建失败时输出错误信息。</param>
 	/// <returns>创建成功返回 true，否则返回 false。</returns>
-	public static bool TryCreateDevModProject(string modName, out string createdProjectPath, out string errorMessage)
+	public static bool TryCreateDevModProject(
+		string modName,
+		string author,
+		string version,
+		out string createdProjectPath,
+		out string errorMessage)
 	{
 		createdProjectPath = string.Empty;
 		errorMessage = string.Empty;
@@ -94,9 +104,24 @@ public static class ReForgeModManager
 		}
 
 		string trimmedName = modName.Trim();
+		string trimmedAuthor = author?.Trim() ?? string.Empty;
+		string trimmedVersion = version?.Trim() ?? string.Empty;
+
 		if (!IsValidProjectDirectoryName(trimmedName))
 		{
 			errorMessage = "Mod name contains invalid path characters.";
+			return false;
+		}
+
+		if (string.IsNullOrWhiteSpace(trimmedAuthor))
+		{
+			errorMessage = "Mod author cannot be empty.";
+			return false;
+		}
+
+		if (string.IsNullOrWhiteSpace(trimmedVersion))
+		{
+			errorMessage = "Mod version cannot be empty.";
 			return false;
 		}
 
@@ -110,6 +135,12 @@ public static class ReForgeModManager
 
 		string devRoot = Path.Combine(gameRoot, "dev");
 		string modRoot = Path.Combine(devRoot, trimmedName);
+		ResolveReferencePaths(
+			gameRoot,
+			out string reforgeDllPath,
+			out string harmonyDllPath,
+			out string sts2DllPath);
+
 		if (Directory.Exists(modRoot))
 		{
 			errorMessage = $"Target directory already exists: {modRoot}";
@@ -125,8 +156,16 @@ public static class ReForgeModManager
 			string resourceFolderPath = Path.Combine(modRoot, resourceFolderName);
 			Directory.CreateDirectory(resourceFolderPath);
 
+			string manifestFilePath = Path.Combine(modRoot, resourceFolderName + ".json");
+			string manifestJson = BuildManifestText(trimmedName, trimmedAuthor, trimmedVersion, resourceFolderName);
+			File.WriteAllText(manifestFilePath, manifestJson, Encoding.UTF8);
+
 			string projectFilePath = Path.Combine(modRoot, trimmedName + ".csproj");
-			string csproj = BuildProjectFileText(resourceFolderName);
+			string csproj = BuildProjectFileText(
+				resourceFolderName,
+				reforgeDllPath,
+				harmonyDllPath,
+				sts2DllPath);
 			File.WriteAllText(projectFilePath, csproj, Encoding.UTF8);
 
 			string modMainFilePath = Path.Combine(modRoot, "ModMain.cs");
@@ -141,6 +180,490 @@ public static class ReForgeModManager
 			errorMessage = $"Failed to create dev mod project: {ex.Message}";
 			return false;
 		}
+	}
+
+	/// <summary>
+	/// 获取开发中模组目录（dev）的绝对路径。
+	/// </summary>
+	/// <returns>若能解析游戏根目录则返回 dev 目录路径，否则返回空字符串。</returns>
+	public static string GetDevModsRootPath()
+	{
+		string? gameRoot = ResolveGameRootDirectory();
+		if (string.IsNullOrWhiteSpace(gameRoot))
+		{
+			return string.Empty;
+		}
+
+		return Path.Combine(gameRoot, "dev");
+	}
+
+	/// <summary>
+	/// 获取开发中模组（dev 目录）下可识别的项目列表。
+	/// </summary>
+	/// <returns>开发模组项目快照列表。</returns>
+	public static IReadOnlyList<ReForgeDevModProject> GetDevModProjects()
+	{
+		string devRoot = GetDevModsRootPath();
+		if (string.IsNullOrWhiteSpace(devRoot) || !Directory.Exists(devRoot))
+		{
+			return Array.Empty<ReForgeDevModProject>();
+		}
+
+		List<ReForgeDevModProject> results = new();
+		foreach (string modDirectory in Directory.GetDirectories(devRoot))
+		{
+			string modName = Path.GetFileName(modDirectory) ?? "unknown";
+			string? projectFile = ResolveProjectFile(modDirectory, modName);
+			string? manifestFile = ResolveManifestFile(modDirectory);
+			string expectedResourceDirectory = BuildResourceFolderName(modName);
+
+			DateTimeOffset lastWriteTimeUtc;
+			if (!string.IsNullOrWhiteSpace(projectFile) && File.Exists(projectFile))
+			{
+				lastWriteTimeUtc = File.GetLastWriteTimeUtc(projectFile);
+			}
+			else
+			{
+				lastWriteTimeUtc = Directory.GetLastWriteTimeUtc(modDirectory);
+			}
+
+			results.Add(new ReForgeDevModProject
+			{
+				ModName = modName,
+				ModDirectory = modDirectory,
+				ProjectFilePath = projectFile,
+				ManifestFilePath = manifestFile,
+				HasModMainFile = File.Exists(Path.Combine(modDirectory, "ModMain.cs")),
+				HasResourceDirectory = Directory.Exists(Path.Combine(modDirectory, expectedResourceDirectory)),
+				LastModifiedAtUtc = lastWriteTimeUtc
+			});
+		}
+
+		return results
+			.OrderBy(static project => project.ModName, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(static project => project.ModDirectory, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	/// <summary>
+	/// 构建指定的开发模组项目（.csproj）。
+	/// </summary>
+	/// <param name="projectFilePath">待构建的项目文件绝对路径。</param>
+	/// <returns>构建结果摘要与输出日志。</returns>
+	public static ReForgeDevBuildResult BuildDevModProject(string projectFilePath)
+	{
+		if (string.IsNullOrWhiteSpace(projectFilePath))
+		{
+			return new ReForgeDevBuildResult
+			{
+				Succeeded = false,
+				Summary = "Project path is empty.",
+				Output = ""
+			};
+		}
+
+		string fullProjectPath;
+		try
+		{
+			fullProjectPath = Path.GetFullPath(projectFilePath);
+		}
+		catch (Exception ex)
+		{
+			return new ReForgeDevBuildResult
+			{
+				Succeeded = false,
+				Summary = $"Invalid project path: {ex.Message}",
+				Output = ""
+			};
+		}
+
+		if (!File.Exists(fullProjectPath))
+		{
+			return new ReForgeDevBuildResult
+			{
+				Succeeded = false,
+				Summary = $"Project file not found: {fullProjectPath}",
+				Output = ""
+			};
+		}
+
+		string projectDirectory = Path.GetDirectoryName(fullProjectPath) ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(projectDirectory) || !Directory.Exists(projectDirectory))
+		{
+			return new ReForgeDevBuildResult
+			{
+				Succeeded = false,
+				Summary = $"Project directory not found: {projectDirectory}",
+				Output = ""
+			};
+		}
+
+		try
+		{
+			ProcessStartInfo startInfo = new()
+			{
+				FileName = "dotnet",
+				WorkingDirectory = projectDirectory,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			};
+			startInfo.ArgumentList.Add("build");
+			startInfo.ArgumentList.Add(fullProjectPath);
+			startInfo.ArgumentList.Add("-c");
+			startInfo.ArgumentList.Add("Release");
+
+			using Process process = new()
+			{
+				StartInfo = startInfo
+			};
+
+			if (!process.Start())
+			{
+				return new ReForgeDevBuildResult
+				{
+					Succeeded = false,
+					Summary = $"Failed to start dotnet build process for '{fullProjectPath}'.",
+					Output = ""
+				};
+			}
+
+			var stdoutTask = process.StandardOutput.ReadToEndAsync();
+			var stderrTask = process.StandardError.ReadToEndAsync();
+			process.WaitForExit();
+
+			string stdout = stdoutTask.GetAwaiter().GetResult();
+			string stderr = stderrTask.GetAwaiter().GetResult();
+			StringBuilder outputBuilder = new();
+			outputBuilder.Append(MergeBuildOutput(stdout, stderr));
+
+			bool success = process.ExitCode == 0;
+			string summary = success
+				? $"Build succeeded. project='{fullProjectPath}', exitCode={process.ExitCode}."
+				: $"Build failed. project='{fullProjectPath}', exitCode={process.ExitCode}.";
+
+			if (success)
+			{
+				if (TryDeployDevBuildArtifacts(projectDirectory, fullProjectPath, out string deployedDirectory, out string deployMessage))
+				{
+					summary = $"Build and deploy succeeded. project='{fullProjectPath}', deployed='{deployedDirectory}'.";
+					outputBuilder.Append(System.Environment.NewLine)
+						.Append(System.Environment.NewLine)
+						.Append("----- DEPLOY -----")
+						.Append(System.Environment.NewLine)
+						.Append(deployMessage);
+				}
+				else
+				{
+					success = false;
+					summary = $"Build succeeded but deploy failed. project='{fullProjectPath}'.";
+					outputBuilder.Append(System.Environment.NewLine)
+						.Append(System.Environment.NewLine)
+						.Append("----- DEPLOY ERROR -----")
+						.Append(System.Environment.NewLine)
+						.Append(deployMessage);
+				}
+			}
+
+			return new ReForgeDevBuildResult
+			{
+				Succeeded = success,
+				Summary = summary,
+				Output = TrimBuildOutput(outputBuilder.ToString(), maxLines: 180, maxChars: 20000)
+			};
+		}
+		catch (Exception ex)
+		{
+			return new ReForgeDevBuildResult
+			{
+				Succeeded = false,
+				Summary = $"Build exception: {ex.Message}",
+				Output = ex.ToString()
+			};
+		}
+	}
+
+	/// <summary>
+	/// Uninstalls a deployed development mod from the runtime mods directory.
+	/// </summary>
+	/// <param name="projectDirectoryPath">The absolute project directory path under the dev root.</param>
+	/// <returns>A runtime action result that describes success state, restart requirement, and operation details.</returns>
+	public static ReForgeModRuntimeActionResult UninstallDevModProject(string projectDirectoryPath)
+	{
+		if (string.IsNullOrWhiteSpace(projectDirectoryPath))
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = "Project directory path is empty.",
+				Details = string.Empty
+			};
+		}
+
+		string fullProjectDirectory;
+		try
+		{
+			fullProjectDirectory = Path.GetFullPath(projectDirectoryPath);
+		}
+		catch (Exception ex)
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = $"Invalid project directory path: {ex.Message}",
+				Details = ex.ToString()
+			};
+		}
+
+		string? gameRoot = ResolveGameRootDirectory();
+		if (string.IsNullOrWhiteSpace(gameRoot))
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = "Cannot resolve game root directory.",
+				Details = fullProjectDirectory
+			};
+		}
+
+		string projectFolderName = Path.GetFileName(fullProjectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+		if (string.IsNullOrWhiteSpace(projectFolderName))
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = "Cannot infer project folder name.",
+				Details = fullProjectDirectory
+			};
+		}
+
+		string deployedDirectory = Path.Combine(gameRoot, "mods", projectFolderName);
+		bool deployedExists = Directory.Exists(deployedDirectory);
+
+		string? modId = null;
+		bool loadedAtRuntime = false;
+		if (TryResolveDevManifest(fullProjectDirectory, out _, out ReForgeModManifest manifest)
+			&& !string.IsNullOrWhiteSpace(manifest.Id))
+		{
+			modId = manifest.Id;
+			loadedAtRuntime = Contexts.Any(mod => mod.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase)
+				&& mod.State == ReForgeModLoadState.Loaded);
+
+			SetModEnabledForNextLaunch(modId, enabled: false);
+		}
+
+		StringBuilder detailsBuilder = new();
+		detailsBuilder.AppendLine($"Project directory: {fullProjectDirectory}");
+		detailsBuilder.AppendLine($"Deployed directory: {deployedDirectory}");
+
+		if (loadedAtRuntime)
+		{
+			detailsBuilder.AppendLine("The target mod is currently loaded. Runtime unload is not supported for already loaded DLL/PCK assets.");
+			detailsBuilder.AppendLine("The mod has been set to disabled for next launch. Restart the game to complete unload.");
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = true,
+				RequiresRestart = true,
+				Summary = string.IsNullOrWhiteSpace(modId)
+					? "Mod unload was scheduled for next launch."
+					: $"Mod '{modId}' unload was scheduled for next launch.",
+				Details = detailsBuilder.ToString()
+			};
+		}
+
+		if (!deployedExists)
+		{
+			detailsBuilder.AppendLine("No deployed directory was found under mods. Nothing to delete.");
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = true,
+				RequiresRestart = false,
+				Summary = string.IsNullOrWhiteSpace(modId)
+					? "Mod was already uninstalled from mods directory."
+					: $"Mod '{modId}' was already uninstalled from mods directory.",
+				Details = detailsBuilder.ToString()
+			};
+		}
+
+		try
+		{
+			Directory.Delete(deployedDirectory, recursive: true);
+			detailsBuilder.AppendLine("Deleted deployed mod directory successfully.");
+
+			if (!string.IsNullOrWhiteSpace(modId))
+			{
+				for (int i = 0; i < Contexts.Count; i++)
+				{
+					ReForgeModContext context = Contexts[i];
+					if (!context.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase))
+					{
+						continue;
+					}
+
+					if (context.State != ReForgeModLoadState.Loaded)
+					{
+						context.State = ReForgeModLoadState.Disabled;
+					}
+				}
+			}
+
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = true,
+				RequiresRestart = false,
+				Summary = string.IsNullOrWhiteSpace(modId)
+					? "Mod files were uninstalled from mods directory."
+					: $"Mod '{modId}' files were uninstalled from mods directory.",
+				Details = detailsBuilder.ToString()
+			};
+		}
+		catch (Exception ex)
+		{
+			detailsBuilder.AppendLine("Failed to delete deployed directory.");
+			detailsBuilder.AppendLine(ex.ToString());
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = "Uninstall failed while deleting deployed files.",
+				Details = detailsBuilder.ToString()
+			};
+		}
+	}
+
+	/// <summary>
+	/// Reloads a development mod by re-discovering its manifest and attempting runtime load when possible.
+	/// </summary>
+	/// <param name="projectDirectoryPath">The absolute project directory path under the dev root.</param>
+	/// <returns>A runtime action result that describes success state, restart requirement, and operation details.</returns>
+	public static ReForgeModRuntimeActionResult ReloadDevModProject(string projectDirectoryPath)
+	{
+		if (string.IsNullOrWhiteSpace(projectDirectoryPath))
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = "Project directory path is empty.",
+				Details = string.Empty
+			};
+		}
+
+		string fullProjectDirectory;
+		try
+		{
+			fullProjectDirectory = Path.GetFullPath(projectDirectoryPath);
+		}
+		catch (Exception ex)
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = $"Invalid project directory path: {ex.Message}",
+				Details = ex.ToString()
+			};
+		}
+
+		if (!TryResolveDevManifest(fullProjectDirectory, out _, out ReForgeModManifest manifest)
+			|| string.IsNullOrWhiteSpace(manifest.Id))
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = "Cannot reload because no valid manifest was found in project directory.",
+				Details = fullProjectDirectory
+			};
+		}
+
+		string modId = manifest.Id;
+		SetModEnabledForNextLaunch(modId, enabled: true);
+
+		ReForgeModContext? loadedContext = Contexts.FirstOrDefault(mod => mod.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase)
+			&& mod.State == ReForgeModLoadState.Loaded);
+		if (loadedContext != null)
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = true,
+				RequiresRestart = true,
+				Summary = $"Mod '{modId}' is already loaded. Full reload requires restart.",
+				Details =
+					"Official STS2 lifecycle does not support unloading already loaded DLL/PCK content at runtime.\n" +
+					"The mod remains enabled for next launch, and restart is required to apply new binaries."
+			};
+		}
+
+		List<ReForgeModContext> discovered = Lifecycle.DiscoverMods();
+		EnsureSelfContext(discovered);
+		ReForgeModContext? candidate = discovered.FirstOrDefault(mod => mod.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase));
+		if (candidate == null)
+		{
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = false,
+				RequiresRestart = false,
+				Summary = $"No deployed mod with id '{modId}' was found under the mods directory.",
+				Details = "Build and deploy the project first, then click Reload."
+			};
+		}
+
+		for (int i = Contexts.Count - 1; i >= 0; i--)
+		{
+			if (!Contexts[i].ModId.Equals(modId, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (Contexts[i].State == ReForgeModLoadState.Loaded)
+			{
+				continue;
+			}
+
+			Contexts.RemoveAt(i);
+		}
+
+		ReForgeModSettings runtimeSettings = ReForgeModSettingsStore.Load();
+		HashSet<string> loadedIds = Contexts
+			.Where(mod => mod.State == ReForgeModLoadState.Loaded)
+			.Select(mod => mod.ModId)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		Lifecycle.TryLoad(candidate, runtimeSettings, loadedIds);
+		Contexts.Add(candidate);
+		OnModDetected?.Invoke(candidate);
+
+		if (candidate.State == ReForgeModLoadState.Loaded)
+		{
+			TryRunRuntimeReloadPostHooks(modId);
+			return new ReForgeModRuntimeActionResult
+			{
+				Succeeded = true,
+				RequiresRestart = false,
+				Summary = $"Mod '{modId}' reloaded at runtime.",
+				Details =
+					$"Manifest path: {candidate.ManifestPath}{System.Environment.NewLine}" +
+					$"Mod path: {candidate.ModPath}{System.Environment.NewLine}" +
+					"Initializer and runtime localization refresh hooks have been executed."
+			};
+		}
+
+		bool requiresRestart = candidate.State == ReForgeModLoadState.Disabled;
+		return new ReForgeModRuntimeActionResult
+		{
+			Succeeded = false,
+			RequiresRestart = requiresRestart,
+			Summary = $"Runtime reload failed for '{modId}'. State: {candidate.State}.",
+			Details = candidate.Errors.Count > 0
+				? string.Join(System.Environment.NewLine, candidate.Errors)
+				: "See diagnostics panel for phase details."
+		};
 	}
 
 	/// <summary>
@@ -356,6 +879,255 @@ public static class ReForgeModManager
 		return true;
 	}
 
+	private static void TryRunRuntimeReloadPostHooks(string modId)
+	{
+		try
+		{
+			LocalizationResourceBridge.RefreshCurrentLanguage();
+
+			if (LocManager.Instance != null)
+			{
+				string currentLanguage = LocManager.Instance.Language;
+				LocManager.Instance.SetLanguage(currentLanguage);
+			}
+
+			NGame.Instance?.Relocalize();
+			GD.Print($"[ReForge.ModLoader] Runtime reload hooks executed for '{modId}'.");
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.ModLoader] Runtime reload post hooks failed for '{modId}': {ex}");
+		}
+	}
+
+	private static bool TryDeployDevBuildArtifacts(
+		string projectDirectory,
+		string projectFilePath,
+		out string deployedDirectory,
+		out string deployMessage)
+	{
+		deployedDirectory = string.Empty;
+		deployMessage = string.Empty;
+
+		string? gameRoot = ResolveGameRootDirectory();
+		if (string.IsNullOrWhiteSpace(gameRoot))
+		{
+			deployMessage = "Cannot resolve game root directory from executable path.";
+			return false;
+		}
+
+		string? builtDllPath = ResolveBuildAssemblyPath(projectDirectory, projectFilePath);
+		if (string.IsNullOrWhiteSpace(builtDllPath) || !File.Exists(builtDllPath))
+		{
+			deployMessage = "Cannot locate built dll under the project build directory.";
+			return false;
+		}
+
+		if (!TryResolveDevManifest(projectDirectory, out string manifestPath, out ReForgeModManifest manifest))
+		{
+			deployMessage = "Cannot find a valid mod manifest json (with non-empty id) in the project root.";
+			return false;
+		}
+
+		if (string.IsNullOrWhiteSpace(manifest.Id))
+		{
+			deployMessage = "Manifest id is empty.";
+			return false;
+		}
+
+		string modDirectoryName = Path.GetFileName(projectDirectory) ?? manifest.Id;
+		string modsRoot = Path.Combine(gameRoot, "mods");
+		string targetModDirectory = Path.Combine(modsRoot, modDirectoryName);
+		Directory.CreateDirectory(targetModDirectory);
+
+		string targetManifestPath = Path.Combine(targetModDirectory, Path.GetFileName(manifestPath));
+		string targetDllPath = Path.Combine(targetModDirectory, manifest.Id + ".dll");
+
+		File.Copy(manifestPath, targetManifestPath, overwrite: true);
+		File.Copy(builtDllPath, targetDllPath, overwrite: true);
+
+		deployedDirectory = targetModDirectory;
+		deployMessage =
+			$"Copied manifest: {targetManifestPath}" + System.Environment.NewLine +
+			$"Copied dll: {targetDllPath}";
+
+		return true;
+	}
+
+	private static string? ResolveBuildAssemblyPath(string projectDirectory, string projectFilePath)
+	{
+		string projectName = Path.GetFileNameWithoutExtension(projectFilePath);
+		string preferredPath = Path.Combine(projectDirectory, "build", projectName + ".dll");
+		if (File.Exists(preferredPath))
+		{
+			return preferredPath;
+		}
+
+		string buildDirectory = Path.Combine(projectDirectory, "build");
+		if (!Directory.Exists(buildDirectory))
+		{
+			return null;
+		}
+
+		return Directory
+			.GetFiles(buildDirectory, "*.dll", SearchOption.TopDirectoryOnly)
+			.OrderByDescending(File.GetLastWriteTimeUtc)
+			.ThenBy(static path => path, StringComparer.OrdinalIgnoreCase)
+			.FirstOrDefault();
+	}
+
+	private static bool TryResolveDevManifest(string projectDirectory, out string manifestPath, out ReForgeModManifest manifest)
+	{
+		manifestPath = string.Empty;
+		manifest = null!;
+
+		string[] candidates = Directory
+			.GetFiles(projectDirectory, "*.json", SearchOption.TopDirectoryOnly)
+			.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+
+		foreach (string path in candidates)
+		{
+			if (!TryReadManifestFromJson(path, out ReForgeModManifest parsed))
+			{
+				continue;
+			}
+
+			if (string.IsNullOrWhiteSpace(parsed.Id))
+			{
+				continue;
+			}
+
+			manifestPath = path;
+			manifest = parsed;
+			return true;
+		}
+
+		return false;
+	}
+
+	private static bool TryReadManifestFromJson(string filePath, out ReForgeModManifest manifest)
+	{
+		manifest = null!;
+
+		try
+		{
+			string json = File.ReadAllText(filePath);
+			ReForgeModManifest? parsed = JsonSerializer.Deserialize<ReForgeModManifest>(json, new JsonSerializerOptions
+			{
+				PropertyNameCaseInsensitive = true
+			});
+
+			if (parsed == null)
+			{
+				return false;
+			}
+
+			manifest = parsed;
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static string? ResolveProjectFile(string modDirectory, string modName)
+	{
+		string preferred = Path.Combine(modDirectory, modName + ".csproj");
+		if (File.Exists(preferred))
+		{
+			return preferred;
+		}
+
+		string[] candidates = Directory
+			.GetFiles(modDirectory, "*.csproj", SearchOption.TopDirectoryOnly)
+			.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+
+		return candidates.FirstOrDefault();
+	}
+
+	private static string? ResolveManifestFile(string modDirectory)
+	{
+		string[] candidates = Directory
+			.GetFiles(modDirectory, "*.json", SearchOption.TopDirectoryOnly)
+			.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+
+		foreach (string path in candidates)
+		{
+			if (!TryReadManifestFromJson(path, out ReForgeModManifest manifest))
+			{
+				continue;
+			}
+
+			if (string.IsNullOrWhiteSpace(manifest.Id))
+			{
+				continue;
+			}
+
+			return path;
+		}
+
+		return null;
+	}
+
+	private static string MergeBuildOutput(string stdout, string stderr)
+	{
+		if (string.IsNullOrWhiteSpace(stderr))
+		{
+			return stdout ?? string.Empty;
+		}
+
+		if (string.IsNullOrWhiteSpace(stdout))
+		{
+			return stderr;
+		}
+
+		return stdout + System.Environment.NewLine + "----- STDERR -----" + System.Environment.NewLine + stderr;
+	}
+
+	private static string TrimBuildOutput(string output, int maxLines, int maxChars)
+	{
+		if (string.IsNullOrWhiteSpace(output))
+		{
+			return string.Empty;
+		}
+
+		string[] allLines = output
+			.Replace("\r\n", "\n", StringComparison.Ordinal)
+			.Split('\n');
+
+		int skipCount = Math.Max(0, allLines.Length - maxLines);
+		IEnumerable<string> tailLines = allLines.Skip(skipCount);
+		string tail = string.Join(System.Environment.NewLine, tailLines);
+
+		if (tail.Length > maxChars)
+		{
+			tail = tail[^maxChars..];
+		}
+
+		if (skipCount <= 0)
+		{
+			return tail;
+		}
+
+		return $"... (trimmed {skipCount} lines)" + System.Environment.NewLine + tail;
+	}
+
+	private static string? ResolveGameRootDirectory()
+	{
+		string executablePath = OS.GetExecutablePath();
+		string? gameRoot = Path.GetDirectoryName(executablePath);
+		if (string.IsNullOrWhiteSpace(gameRoot))
+		{
+			return null;
+		}
+
+		return gameRoot;
+	}
+
 	private static bool IsValidProjectDirectoryName(string modName)
 	{
 		if (modName.Equals(".", StringComparison.Ordinal) || modName.Equals("..", StringComparison.Ordinal))
@@ -404,7 +1176,11 @@ public static class ReForgeModManager
 		return string.IsNullOrWhiteSpace(normalized) ? "new_mod" : normalized;
 	}
 
-	private static string BuildProjectFileText(string resourceFolderName)
+	private static string BuildProjectFileText(
+		string resourceFolderName,
+		string reforgeDllPath,
+		string harmonyDllPath,
+		string sts2DllPath)
 	{
 		StringBuilder builder = new();
 		builder.AppendLine("<Project Sdk=\"Godot.NET.Sdk/4.5.1\">");
@@ -417,9 +1193,18 @@ public static class ReForgeModManager
 		builder.AppendLine("  </PropertyGroup>");
 		builder.AppendLine();
 		builder.AppendLine("  <ItemGroup>");
-		builder.AppendLine("    <Reference Include=\"ReForge.dll\" />");
-		builder.AppendLine("    <Reference Include=\"data_sts2_windows_x86_64\\0Harmony.dll\" />");
-		builder.AppendLine("    <Reference Include=\"data_sts2_windows_x86_64\\sts2.dll\" />");
+		builder.AppendLine("    <Reference Include=\"ReForge\">");
+		builder.AppendLine($"      <HintPath>{EscapeXmlValue(reforgeDllPath)}</HintPath>");
+		builder.AppendLine("      <Private>false</Private>");
+		builder.AppendLine("    </Reference>");
+		builder.AppendLine("    <Reference Include=\"0Harmony\">");
+		builder.AppendLine($"      <HintPath>{EscapeXmlValue(harmonyDllPath)}</HintPath>");
+		builder.AppendLine("      <Private>false</Private>");
+		builder.AppendLine("    </Reference>");
+		builder.AppendLine("    <Reference Include=\"sts2\">");
+		builder.AppendLine($"      <HintPath>{EscapeXmlValue(sts2DllPath)}</HintPath>");
+		builder.AppendLine("      <Private>false</Private>");
+		builder.AppendLine("    </Reference>");
 		builder.AppendLine("  </ItemGroup>");
 		builder.AppendLine();
 		builder.AppendLine("  <ItemGroup>");
@@ -428,6 +1213,56 @@ public static class ReForgeModManager
 		builder.AppendLine();
 		builder.AppendLine("</Project>");
 		return builder.ToString();
+	}
+
+	private static void ResolveReferencePaths(
+		string gameRoot,
+		out string reforgeDllPath,
+		out string harmonyDllPath,
+		out string sts2DllPath)
+	{
+		reforgeDllPath = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
+
+		string dataDirectory = Path.Combine(gameRoot, "data_sts2_windows_x86_64");
+		harmonyDllPath = Path.GetFullPath(Path.Combine(dataDirectory, "0Harmony.dll"));
+		sts2DllPath = Path.GetFullPath(Path.Combine(dataDirectory, "sts2.dll"));
+	}
+
+	private static string EscapeXmlValue(string value)
+	{
+		if (string.IsNullOrEmpty(value))
+		{
+			return string.Empty;
+		}
+
+		return value
+			.Replace("&", "&amp;", StringComparison.Ordinal)
+			.Replace("<", "&lt;", StringComparison.Ordinal)
+			.Replace(">", "&gt;", StringComparison.Ordinal)
+			.Replace("\"", "&quot;", StringComparison.Ordinal)
+			.Replace("'", "&apos;", StringComparison.Ordinal);
+	}
+
+	private static string BuildManifestText(string modName, string author, string version, string modId)
+	{
+		ReForgeModManifest manifest = new()
+		{
+			Id = modId,
+			Name = modName,
+			Author = author,
+			Description = "A development mod created by ReForge.",
+			Version = version,
+			HasPck = false,
+			HasDll = true,
+			HasEmbeddedResources = true,
+			Dependencies = new List<string>(),
+			AffectsGameplay = true
+		};
+
+		return JsonSerializer.Serialize(manifest, new JsonSerializerOptions
+		{
+			WriteIndented = true
+		});
 	}
 
 	private static string BuildModMainText(string modName)

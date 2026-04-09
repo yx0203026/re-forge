@@ -85,6 +85,47 @@ public sealed class ReForgeModContext
 	public List<string> Errors { get; } = new();
 }
 
+public sealed class ReForgeDevModProject
+{
+	public required string ModName { get; init; }
+
+	public required string ModDirectory { get; init; }
+
+	public string? ProjectFilePath { get; init; }
+
+	public bool HasProjectFile => !string.IsNullOrWhiteSpace(ProjectFilePath);
+
+	public string? ManifestFilePath { get; init; }
+
+	public bool HasManifestFile => !string.IsNullOrWhiteSpace(ManifestFilePath);
+
+	public bool HasModMainFile { get; init; }
+
+	public bool HasResourceDirectory { get; init; }
+
+	public DateTimeOffset LastModifiedAtUtc { get; init; }
+}
+
+public sealed class ReForgeDevBuildResult
+{
+	public required bool Succeeded { get; init; }
+
+	public required string Summary { get; init; }
+
+	public required string Output { get; init; }
+}
+
+public sealed class ReForgeModRuntimeActionResult
+{
+	public required bool Succeeded { get; init; }
+
+	public required bool RequiresRestart { get; init; }
+
+	public required string Summary { get; init; }
+
+	public required string Details { get; init; }
+}
+
 public sealed class ReForgeModSettings
 {
 	public static ReForgeModSettings Default { get; } = new();

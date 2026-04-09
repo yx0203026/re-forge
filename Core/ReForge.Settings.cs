@@ -12,6 +12,7 @@ public static partial class ReForge
 {
 	private const string SettingsScreenKey = "ReForge.Settings";
 	private const string ModManagerScreenKey = "ReForge.ModManager";
+	private const string DevModsScreenKey = "ReForge.DevMods";
 	private const string FeedbackRepositoryUrl = "https://github.com/yx0203026/re-forge";
 	private static bool _settingsInitialized;
 	private static readonly ReForgeSettingsData RuntimeSettings = ReForgeSettingsStore.Load();
@@ -79,7 +80,19 @@ public static partial class ReForge
 			return;
 		}
 
-		modManagerTab.Add(new ReForgeModManagerDashboard());
+		modManagerTab.Add(new ReForgeModManagerDashboard(devMode: false));
+
+		string devModsTabTitle = UI.T("gameplay_ui", "REFORGE.MOD_MANAGER.DEV_TAB", "My Mods");
+		tabHost.AddChild(new SettingTab(devModsTabTitle, selected: false, screenKey: DevModsScreenKey).WithMinHeight(72f));
+
+		SettingTab? devModsTab = tabHost.GetSettingTab(DevModsScreenKey);
+		if (devModsTab == null)
+		{
+			GD.PrintErr($"[ReForge.Settings] Cannot find setting tab '{DevModsScreenKey}'.");
+			return;
+		}
+
+		devModsTab.Add(new ReForgeModManagerDashboard(devMode: true));
 	}
 
 	private static void OnDebugToggled(bool enabled)
