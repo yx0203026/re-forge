@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Nodes;
+using ReForgeFramework.ModResources;
 
 namespace ReForgeFramework.UI.Localization;
 
@@ -107,6 +108,7 @@ public static class UiLocalization
 		}
 
 		_currentLocale = normalized;
+		LocalizationResourceBridge.RefreshCurrentLanguage();
 		LocaleChanged?.Invoke();
 	}
 
@@ -125,6 +127,11 @@ public static class UiLocalization
 		if (TryResolveOfficial(locTable, locEntryKey, key, out string officialText))
 		{
 			return officialText;
+		}
+
+		if (TryResolveEmbeddedLocalization(locTable, locEntryKey, key, out string embeddedText))
+		{
+			return embeddedText;
 		}
 
 		if (string.IsNullOrWhiteSpace(key))
@@ -174,6 +181,38 @@ public static class UiLocalization
 		{
 			return false;
 		}
+	}
+
+	private static bool TryResolveEmbeddedLocalization(string? locTable, string? locEntryKey, string? keyPath, out string value)
+	{
+		value = string.Empty;
+		if (!string.IsNullOrWhiteSpace(locTable) && !string.IsNullOrWhiteSpace(locEntryKey)
+			&& LocalizationResourceBridge.TryGetText(locTable, locEntryKey, _currentLocale, out string directText))
+		{
+			value = directText;
+			return true;
+		}
+
+		if (string.IsNullOrWhiteSpace(keyPath))
+		{
+			return false;
+		}
+
+		int splitIndex = keyPath.IndexOf('/');
+		if (splitIndex <= 0 || splitIndex >= keyPath.Length - 1)
+		{
+			return false;
+		}
+
+		string table = keyPath[..splitIndex];
+		string entry = keyPath[(splitIndex + 1)..];
+		if (!LocalizationResourceBridge.TryGetText(table, entry, _currentLocale, out string keyPathText))
+		{
+			return false;
+		}
+
+		value = keyPathText;
+		return true;
 	}
 
 	private static bool TryBuildOfficialLocString(string? locTable, string? locEntryKey, string? keyPath, out LocString locString)
@@ -260,6 +299,7 @@ public static class UiLocalization
 		try
 		{
 			_currentLocale = NormalizeLocale(LocManager.Instance.Language);
+			LocalizationResourceBridge.RefreshCurrentLanguage();
 		}
 		catch
 		{
