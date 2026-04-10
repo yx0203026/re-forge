@@ -49,9 +49,16 @@ public static class LocalizationResourceBridge
 			}
 
 			Dictionary<string, string> merged = new(StringComparer.OrdinalIgnoreCase);
-			foreach (ReForgeModContext mod in ReForgeModManager.GetLoadedMods())
+			foreach (ReForgeModContext mod in ReForgeModManager.GetAllMods())
 			{
 				if (mod.SourceKind != ReForgeModSourceKind.Embedded)
+				{
+					continue;
+				}
+
+				if (mod.State != ReForgeModLoadState.Loaded
+					&& mod.State != ReForgeModLoadState.AddedAtRuntime
+					&& mod.State != ReForgeModLoadState.Failed)
 				{
 					continue;
 				}

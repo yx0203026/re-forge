@@ -819,7 +819,7 @@ public static class ReForgeModManager
 			}
 		}
 
-		foreach (ReForgeModContext mod in Contexts.Where(m => m.State == ReForgeModLoadState.Loaded))
+		foreach (ReForgeModContext mod in Contexts.Where(CanReadResourcesFromMod))
 		{
 			if (TryReadFromMod(mod, normalized, out bytes))
 			{
@@ -856,7 +856,7 @@ public static class ReForgeModManager
 	private static bool TryReadFromMod(ReForgeModContext mod, string normalizedPath, out byte[] bytes)
 	{
 		bytes = Array.Empty<byte>();
-		if (mod.State != ReForgeModLoadState.Loaded)
+		if (!CanReadResourcesFromMod(mod))
 		{
 			return false;
 		}
@@ -877,6 +877,18 @@ public static class ReForgeModManager
 		bytes = result;
 		Diagnostics.TrackResourceResolve(mod.ModId, normalizedPath, mod.SourceKind.ToString(), success: true, "Resource loaded.");
 		return true;
+	}
+
+	private static bool CanReadResourcesFromMod(ReForgeModContext mod)
+	{
+		if (mod.State == ReForgeModLoadState.Loaded || mod.State == ReForgeModLoadState.AddedAtRuntime)
+		{
+			return true;
+		}
+
+		// 移除“加载失败后禁用嵌入资源读取”机制：
+		// 只要嵌入资源源已绑定成功，Failed 模组也允许继续提供静态资源。
+		return mod.State == ReForgeModLoadState.Failed && mod.SourceKind == ReForgeModSourceKind.Embedded;
 	}
 
 	private static void TryRunRuntimeReloadPostHooks(string modId)
@@ -1208,7 +1220,9 @@ public static class ReForgeModManager
 		builder.AppendLine("  </ItemGroup>");
 		builder.AppendLine();
 		builder.AppendLine("  <ItemGroup>");
-		builder.AppendLine($"    <EmbeddedResource Include=\"{resourceFolderName}\\**\\*\" />");
+		builder.AppendLine($"    <EmbeddedResource Include=\"{resourceFolderName}\\**\\*\">");
+		builder.AppendLine($"      <LogicalName>{resourceFolderName}/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>");
+		builder.AppendLine("    </EmbeddedResource>");
 		builder.AppendLine("  </ItemGroup>");
 		builder.AppendLine();
 		builder.AppendLine("</Project>");

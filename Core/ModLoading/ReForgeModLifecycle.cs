@@ -358,9 +358,9 @@ public sealed class ReForgeModLifecycle
 			{
 				foreach (Type type in initializerTypes)
 				{
-					if (!CallModInitializer(type))
+					if (!CallModInitializer(type, out string failureReason))
 					{
-						MarkFailed(mod, $"Initializer invocation failed for type: {type.FullName}");
+						MarkFailed(mod, $"Initializer invocation failed for type: {type.FullName}. {failureReason}");
 						return false;
 					}
 				}
@@ -376,27 +376,50 @@ public sealed class ReForgeModLifecycle
 		}
 		catch (Exception ex)
 		{
-			MarkFailed(mod, $"Initializer execution exception: {ex.GetType().Name}, {ex.Message}");
+			MarkFailed(mod, $"Initializer execution exception: {FormatExceptionForDiagnostics(ex)}");
 			return false;
 		}
 	}
 
-	private static bool CallModInitializer(Type initializerType)
+	private static bool CallModInitializer(Type initializerType, out string failureReason)
 	{
+		failureReason = string.Empty;
+
 		ModInitializerAttribute? attribute = initializerType.GetCustomAttribute<ModInitializerAttribute>();
 		if (attribute == null)
 		{
+			failureReason = "Missing ModInitializerAttribute on initializer type.";
 			return false;
 		}
 
 		MethodInfo? method = initializerType.GetMethod(attribute.initializerMethod, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 		if (method == null)
 		{
+			failureReason = $"Method '{attribute.initializerMethod}' was not found on type '{initializerType.FullName}'.";
 			return false;
 		}
 
-		method.Invoke(null, null);
-		return true;
+		try
+		{
+			method.Invoke(null, null);
+			return true;
+		}
+		catch (TargetInvocationException ex)
+		{
+			Exception actual = ex.InnerException ?? ex;
+			failureReason = $"Exception while invoking '{initializerType.FullName}.{attribute.initializerMethod}': {FormatExceptionForDiagnostics(actual)}";
+			return false;
+		}
+		catch (Exception ex)
+		{
+			failureReason = $"Reflection invoke failed for '{initializerType.FullName}.{attribute.initializerMethod}': {FormatExceptionForDiagnostics(ex)}";
+			return false;
+		}
+	}
+
+	private static string FormatExceptionForDiagnostics(Exception exception)
+	{
+		return exception.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
 	}
 
 	private void MarkFailed(ReForgeModContext mod, string message)
