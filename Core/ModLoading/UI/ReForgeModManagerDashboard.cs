@@ -8,11 +8,11 @@ using System.Text;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Helpers;
-using ReForgeFramework.UI.Abstractions;
-using ReForgeFramework.UI.Controls;
-using ReForgeFramework.UI.Localization;
-using UiButton = ReForgeFramework.UI.Controls.Button;
-using UiRichText = ReForgeFramework.UI.Controls.RichText;
+using ReForgeFramework.Settings.Abstractions;
+using ReForgeFramework.Settings.Controls;
+using ReForgeFramework.Settings.Localization;
+using UiButton = ReForgeFramework.Settings.Controls.Button;
+using UiRichText = ReForgeFramework.Settings.Controls.RichText;
 
 namespace ReForgeFramework.ModLoading.UI;
 

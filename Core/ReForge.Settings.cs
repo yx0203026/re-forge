@@ -4,9 +4,8 @@ using System;
 using System.Diagnostics;
 using System.Text.Json;
 using Godot;
-using ReForgeFramework.UI.Controls;
 using ReForgeFramework.ModLoading.UI;
-using ReForgeFramework.UI.SystemAreas;
+using ReForgeFramework.Settings;
 
 public static partial class ReForge
 {
@@ -38,61 +37,41 @@ public static partial class ReForge
 
 	private static void RegisterSettingsUi()
 	{
-		SettingsScreenHost settingsHost = UI.GetSettingsScreen();
-		SettingTabPanelHost tabHost = settingsHost.GetSettingTabPanel();
-		string tabTitle = UI.T("gameplay_ui", "REFORGE.SETTINGS.TAB", "ReForge");
-		tabHost.AddChild(new SettingTab(tabTitle, selected: false, screenKey: SettingsScreenKey).WithMinHeight(72f));
+		Settings.Initialize();
 
-		SettingTab? tab = tabHost.GetSettingTab(SettingsScreenKey);
-		if (tab == null)
-		{
-			GD.PrintErr($"[ReForge.Settings] Cannot find setting tab '{SettingsScreenKey}'.");
-			return;
-		}
+		string tabTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.TAB", "ReForge");
+		string optionTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TITLE", "Enable Debug Console");
+		string feedbackTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TITLE", "反馈");
+		string feedbackButtonText = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_BUTTON", "反馈");
 
-		string optionTitle = UI.T("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TITLE", "Enable Debug Console");
-		SettingOptionItem debugToggle = SettingOptionItem
-			.Toggle(optionTitle, RuntimeSettings.EnableDebugConsole, OnDebugToggled)
-			.WithHoverTip("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TIP_TITLE", "REFORGE.SETTINGS.DEBUG_TIP_DESC");
+		Settings.Page(SettingsScreenKey, tabTitle, selected: false)
+			.AddToggle(
+				title: optionTitle,
+				initialValue: RuntimeSettings.EnableDebugConsole,
+				onToggled: OnDebugToggled,
+				tipLocTable: "gameplay_ui",
+				tipTitleEntryKey: "REFORGE.SETTINGS.DEBUG_TIP_TITLE",
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.DEBUG_TIP_DESC")
+			.AddFeedbackButton(
+				title: feedbackTitle,
+				buttonText: feedbackButtonText,
+				onPressed: OpenFeedbackRepository,
+				tipLocTable: "gameplay_ui",
+				tipTitleEntryKey: "REFORGE.SETTINGS.FEEDBACK_TIP_TITLE",
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.FEEDBACK_TIP_DESC");
 
-		tab.Add(debugToggle);
-
-		string feedbackTitle = UI.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TITLE", "反馈");
-		string feedbackButtonText = UI.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_BUTTON", "反馈");
-		SettingOptionItem feedbackItem = SettingOptionItem
-			.FeedbackButton(feedbackTitle, feedbackButtonText, OpenFeedbackRepository)
-			.WithHoverTip("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TIP_TITLE", "REFORGE.SETTINGS.FEEDBACK_TIP_DESC");
-
-		tab.Add(feedbackItem);
-
-		RegisterModManagerTab(tabHost);
+		RegisterModManagerTab();
 	}
 
-	private static void RegisterModManagerTab(SettingTabPanelHost tabHost)
+	private static void RegisterModManagerTab()
 	{
-		string modManagerTabTitle = UI.T("gameplay_ui", "REFORGE.MOD_MANAGER.TAB", "Mod Manager");
-		tabHost.AddChild(new SettingTab(modManagerTabTitle, selected: false, screenKey: ModManagerScreenKey).WithMinHeight(72f));
+		string modManagerTabTitle = Settings.T("gameplay_ui", "REFORGE.MOD_MANAGER.TAB", "Mod Manager");
+		Settings.Page(ModManagerScreenKey, modManagerTabTitle, selected: false)
+			.AddElement(new ReForgeModManagerDashboard(devMode: false));
 
-		SettingTab? modManagerTab = tabHost.GetSettingTab(ModManagerScreenKey);
-		if (modManagerTab == null)
-		{
-			GD.PrintErr($"[ReForge.Settings] Cannot find setting tab '{ModManagerScreenKey}'.");
-			return;
-		}
-
-		modManagerTab.Add(new ReForgeModManagerDashboard(devMode: false));
-
-		string devModsTabTitle = UI.T("gameplay_ui", "REFORGE.MOD_MANAGER.DEV_TAB", "My Mods");
-		tabHost.AddChild(new SettingTab(devModsTabTitle, selected: false, screenKey: DevModsScreenKey).WithMinHeight(72f));
-
-		SettingTab? devModsTab = tabHost.GetSettingTab(DevModsScreenKey);
-		if (devModsTab == null)
-		{
-			GD.PrintErr($"[ReForge.Settings] Cannot find setting tab '{DevModsScreenKey}'.");
-			return;
-		}
-
-		devModsTab.Add(new ReForgeModManagerDashboard(devMode: true));
+		string devModsTabTitle = Settings.T("gameplay_ui", "REFORGE.MOD_MANAGER.DEV_TAB", "My Mods");
+		Settings.Page(DevModsScreenKey, devModsTabTitle, selected: false)
+			.AddElement(new ReForgeModManagerDashboard(devMode: true));
 	}
 
 	private static void OnDebugToggled(bool enabled)

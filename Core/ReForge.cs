@@ -8,22 +8,20 @@ using ReForgeFramework.EventBus.Examples;
 using ReForgeFramework.Mixins.Runtime;
 using ReForgeFramework.ModLoading;
 using ReForgeFramework.ModResources;
-using ReForgeFramework.UI;
-using ReForgeFramework.UI.Examples;
+using ReForgeFramework.Settings;
 
 [ModInitializer(nameof(Initialize))]
 public static partial class ReForge
 {
-	private const bool EnableUiDemo = false;
 	private const bool EnableEventBusDemo = true;
 	private const bool EnableMixinDemo = false;
 
 	private static bool _initialized;
 	private static bool _postInitializeScheduled;
 	private static Harmony _harmony = null!;
-	private static readonly ReForgeUiFacade _uiFacade = new();
+	private static readonly ReForgeSettingsApi _settingsApi = new();
 
-	public static ReForgeUiFacade UI => _uiFacade;
+	public static ReForgeSettingsApi Settings => _settingsApi;
 
 	private static void Initialize()
 	{
@@ -83,7 +81,6 @@ public static partial class ReForge
 				RefreshLocalizationTablesForLoadedMods();
 				InitializeRuntimeSettings();
 				ApplyPostInitializationSettings();
-				BuildLogo();
 			}), (uint)GodotObject.ConnectFlags.OneShot);
 			return;
 		}
@@ -93,7 +90,6 @@ public static partial class ReForge
 		RefreshLocalizationTablesForLoadedMods();
 		InitializeRuntimeSettings();
 		ApplyPostInitializationSettings();
-		BuildLogo();
 	}
 
 	private static void RefreshLocalizationTablesForLoadedMods()
