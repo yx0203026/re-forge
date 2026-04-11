@@ -19,7 +19,6 @@ public static class OfficialLocalizationFallbackPatches
 {
 	private static readonly FieldInfo LocTableNameField = AccessTools.Field(typeof(LocTable), "_name");
 	private static readonly object LogSync = new();
-	private static readonly HashSet<string> LoggedFallbackHits = new(StringComparer.Ordinal);
 	private static readonly HashSet<string> LoggedFallbackMisses = new(StringComparer.Ordinal);
 
 	[HarmonyPatch(typeof(LocTable), nameof(LocTable.HasEntry))]
@@ -75,38 +74,26 @@ public static class OfficialLocalizationFallbackPatches
 
 		string language = LocManager.Instance.Language;
 		bool resolved = LocalizationResourceBridge.TryGetText(tableName, key, language, out value);
-		LogFallbackProbe(tableName, key, language, resolved, value);
+		LogFallbackProbe(tableName, key, language, resolved);
 		return resolved;
 	}
 
-	private static void LogFallbackProbe(string table, string key, string language, bool resolved, string value)
+	private static void LogFallbackProbe(string table, string key, string language, bool resolved)
 	{
+		if (resolved)
+		{
+			return;
+		}
+
 		string fingerprint = string.Concat(language, "|", table, "|", key);
 		lock (LogSync)
 		{
-			HashSet<string> bucket = resolved ? LoggedFallbackHits : LoggedFallbackMisses;
-			if (!bucket.Add(fingerprint))
+			if (!LoggedFallbackMisses.Add(fingerprint))
 			{
 				return;
 			}
 		}
 
-		if (resolved)
-		{
-			GD.Print($"[ReForge.LocalizationFallback] HIT {language} {table}.{key} => '{TruncateForLog(value)}'");
-			return;
-		}
-
 		GD.Print($"[ReForge.LocalizationFallback] MISS {language} {table}.{key}");
-	}
-
-	private static string TruncateForLog(string value)
-	{
-		if (value.Length <= 72)
-		{
-			return value;
-		}
-
-		return value[..72] + "...";
 	}
 }
