@@ -19,6 +19,8 @@ namespace ReForgeFramework.ModLoading;
 
 public static class ReForgeModManager
 {
+	private const string RuntimeModsDirectoryName = "ReForgeMods";
+
 	private static bool _initialized;
 	private static readonly ReForgeModDiagnostics Diagnostics = new();
 	private static readonly ReForgeModFileIo FileIo = new();
@@ -385,7 +387,7 @@ public static class ReForgeModManager
 	}
 
 	/// <summary>
-	/// Uninstalls a deployed development mod from the runtime mods directory.
+	/// Uninstalls a deployed development mod from the runtime ReForgeMods directory.
 	/// </summary>
 	/// <param name="projectDirectoryPath">The absolute project directory path under the dev root.</param>
 	/// <returns>A runtime action result that describes success state, restart requirement, and operation details.</returns>
@@ -442,7 +444,7 @@ public static class ReForgeModManager
 			};
 		}
 
-		string deployedDirectory = Path.Combine(gameRoot, "mods", projectFolderName);
+		string deployedDirectory = Path.Combine(gameRoot, RuntimeModsDirectoryName, projectFolderName);
 		bool deployedExists = Directory.Exists(deployedDirectory);
 
 		string? modId = null;
@@ -478,14 +480,14 @@ public static class ReForgeModManager
 
 		if (!deployedExists)
 		{
-			detailsBuilder.AppendLine("No deployed directory was found under mods. Nothing to delete.");
+			detailsBuilder.AppendLine("No deployed directory was found under ReForgeMods. Nothing to delete.");
 			return new ReForgeModRuntimeActionResult
 			{
 				Succeeded = true,
 				RequiresRestart = false,
 				Summary = string.IsNullOrWhiteSpace(modId)
-					? "Mod was already uninstalled from mods directory."
-					: $"Mod '{modId}' was already uninstalled from mods directory.",
+					? "Mod was already uninstalled from ReForgeMods directory."
+					: $"Mod '{modId}' was already uninstalled from ReForgeMods directory.",
 				Details = detailsBuilder.ToString()
 			};
 		}
@@ -517,8 +519,8 @@ public static class ReForgeModManager
 				Succeeded = true,
 				RequiresRestart = false,
 				Summary = string.IsNullOrWhiteSpace(modId)
-					? "Mod files were uninstalled from mods directory."
-					: $"Mod '{modId}' files were uninstalled from mods directory.",
+					? "Mod files were uninstalled from ReForgeMods directory."
+					: $"Mod '{modId}' files were uninstalled from ReForgeMods directory.",
 				Details = detailsBuilder.ToString()
 			};
 		}
@@ -609,7 +611,7 @@ public static class ReForgeModManager
 			{
 				Succeeded = false,
 				RequiresRestart = false,
-				Summary = $"No deployed mod with id '{modId}' was found under the mods directory.",
+				Summary = $"No deployed mod with id '{modId}' was found under the ReForgeMods directory.",
 				Details = "Build and deploy the project first, then click Reload."
 			};
 		}
@@ -881,7 +883,8 @@ public static class ReForgeModManager
 
 	private static bool CanReadResourcesFromMod(ReForgeModContext mod)
 	{
-		if (mod.State == ReForgeModLoadState.Loaded || mod.State == ReForgeModLoadState.AddedAtRuntime)
+		if ((mod.State == ReForgeModLoadState.Loaded || mod.State == ReForgeModLoadState.AddedAtRuntime)
+			&& mod.SourceKind != ReForgeModSourceKind.Unknown)
 		{
 			return true;
 		}
@@ -948,7 +951,7 @@ public static class ReForgeModManager
 		}
 
 		string modDirectoryName = Path.GetFileName(projectDirectory) ?? manifest.Id;
-		string modsRoot = Path.Combine(gameRoot, "mods");
+		string modsRoot = Path.Combine(gameRoot, RuntimeModsDirectoryName);
 		string targetModDirectory = Path.Combine(modsRoot, modDirectoryName);
 		Directory.CreateDirectory(targetModDirectory);
 
