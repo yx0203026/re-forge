@@ -10,6 +10,7 @@ public sealed class ReForgeModDiagnostics
 {
 	private readonly List<ReForgeModDiagnosticEvent> _events = new();
 	private readonly object _lock = new();
+	private readonly HashSet<string> _resourceMissFingerprints = new(StringComparer.Ordinal);
 
 	public void TrackPhase(string modId, ReForgeModPhase phase, ReForgeModLoadState state, string detail)
 	{
@@ -34,21 +35,30 @@ public sealed class ReForgeModDiagnostics
 		ArgumentException.ThrowIfNullOrWhiteSpace(source);
 		ArgumentException.ThrowIfNullOrWhiteSpace(detail);
 
+		if (success)
+		{
+			// 资源命中属于高频热路径，跳过逐条诊断与日志，避免 UI 线程抖动。
+			return;
+		}
+
+		string fingerprint = string.Concat(modId, "|", source, "|", resourcePath);
+		lock (_lock)
+		{
+			if (!_resourceMissFingerprints.Add(fingerprint))
+			{
+				return;
+			}
+		}
+
 		Append(new ReForgeModDiagnosticEvent
 		{
 			ModId = modId,
 			Phase = ReForgeModPhase.ResourceBinding,
-			State = success ? ReForgeModLoadState.Loaded : ReForgeModLoadState.Failed,
+			State = ReForgeModLoadState.Failed,
 			Message = detail,
 			ResourcePath = resourcePath,
 			Source = source
 		});
-
-		if (success)
-		{
-			GD.Print($"[ReForge.ModLoader] [Resource] [Hit] {modId} ({source}) -> {resourcePath}");
-			return;
-		}
 
 		GD.PrintErr($"[ReForge.ModLoader] [Resource] [Miss] {modId} ({source}) -> {resourcePath}, {detail}");
 	}

@@ -57,8 +57,21 @@ public static partial class ReForge
 		EventBus.Initialize();
 		Network.Initialize();
 		ReForgeModManager.Initialize();
+		InitializeEventWheelSafely();
 		SchedulePostInitialization();
 		GD.Print("[ReForge] initialized.");
+	}
+
+	private static void InitializeEventWheelSafely()
+	{
+		try
+		{
+			EventWheel.Initialize();
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge] EventWheel initialization threw unexpectedly and has been degraded. {ex.GetType().Name}: {ex.Message}");
+		}
 	}
 
 	private static void SchedulePostInitialization()

@@ -2,8 +2,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Reflection;
 using Godot;
+using LinqExpression = System.Linq.Expressions.Expression;
 
 namespace ReForgeFramework.EventBus;
 
@@ -12,6 +14,8 @@ internal sealed class EventBusAttributeScanner
 	private readonly EventBusRegistry _registry;
 	private readonly object _syncRoot = new();
 	private readonly HashSet<string> _registeredKeys = new(StringComparer.Ordinal);
+	private readonly HashSet<string> _scannedTypeKeys = new(StringComparer.Ordinal);
+	private readonly Dictionary<MethodInfo, Action<IEventArg?>> _compiledHandlerCache = new();
 
 	public EventBusAttributeScanner(EventBusRegistry registry)
 	{
@@ -48,6 +52,15 @@ internal sealed class EventBusAttributeScanner
 	public void ScanAndRegister(Type rootType)
 	{
 		ArgumentNullException.ThrowIfNull(rootType);
+
+		string typeKey = BuildTypeCacheKey(rootType);
+		lock (_syncRoot)
+		{
+			if (!_scannedTypeKeys.Add(typeKey))
+			{
+				return;
+			}
+		}
 
 		MethodInfo[] methods = rootType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
 		for (int i = 0; i < methods.Length; i++)
@@ -115,7 +128,7 @@ internal sealed class EventBusAttributeScanner
 		}
 
 		Type? parameterType = parameters.Length == 0 ? null : parameters[0].ParameterType;
-		Action<IEventArg?> handler = CreateHandler(method, parameters.Length == 0);
+		Action<IEventArg?> handler = GetOrCreateHandler(method, parameterType);
 
 		bool replaced = _registry.Upsert(
 			new EventSubscription(
@@ -133,13 +146,41 @@ internal sealed class EventBusAttributeScanner
 		}
 	}
 
-	private static Action<IEventArg?> CreateHandler(MethodInfo method, bool noParameter)
+	private Action<IEventArg?> GetOrCreateHandler(MethodInfo method, Type? parameterType)
 	{
-		if (noParameter)
+		lock (_syncRoot)
 		{
-			return _ => method.Invoke(obj: null, parameters: null);
+			if (_compiledHandlerCache.TryGetValue(method, out Action<IEventArg?>? cached))
+			{
+				return cached;
+			}
 		}
 
-		return payload => method.Invoke(obj: null, parameters: new object?[] { payload });
+		Action<IEventArg?> compiled = CreateHandler(method, parameterType);
+		lock (_syncRoot)
+		{
+			_compiledHandlerCache[method] = compiled;
+		}
+
+		return compiled;
+	}
+
+	private static Action<IEventArg?> CreateHandler(MethodInfo method, Type? parameterType)
+	{
+		if (parameterType == null)
+		{
+			Action action = (Action)method.CreateDelegate(typeof(Action));
+			return _ => action();
+		}
+
+		ParameterExpression payload = LinqExpression.Parameter(typeof(IEventArg), "payload");
+		UnaryExpression castPayload = LinqExpression.Convert(payload, parameterType);
+		MethodCallExpression invoke = LinqExpression.Call(method, castPayload);
+		return LinqExpression.Lambda<Action<IEventArg?>>(invoke, payload).Compile();
+	}
+
+	private static string BuildTypeCacheKey(Type type)
+	{
+		return string.Concat(type.AssemblyQualifiedName ?? type.FullName ?? type.Name, ":", type.MetadataToken);
 	}
 }

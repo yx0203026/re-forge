@@ -10,6 +10,8 @@ internal sealed class EventBusRegistry
 	private readonly object _syncRoot = new();
 	private readonly Dictionary<string, Dictionary<string, EventSubscription>> _subscriptionsByEvent =
 		new(StringComparer.Ordinal);
+	private readonly Dictionary<string, EventSubscription[]> _snapshotByEvent =
+		new(StringComparer.Ordinal);
 
 	public bool Upsert(EventSubscription subscription)
 	{
@@ -25,6 +27,7 @@ internal sealed class EventBusRegistry
 
 			bool replaced = listeners.ContainsKey(subscription.BusId);
 			listeners[subscription.BusId] = subscription;
+			_snapshotByEvent.Remove(subscription.EventId);
 			return replaced;
 		}
 	}
@@ -43,6 +46,7 @@ internal sealed class EventBusRegistry
 				if (listeners.Remove(busId))
 				{
 					removed++;
+					_snapshotByEvent.Remove(eventId);
 				}
 
 				if (listeners.Count == 0)
@@ -56,7 +60,9 @@ internal sealed class EventBusRegistry
 			{
 				for (int i = 0; i < emptyEventIds.Count; i++)
 				{
-					_subscriptionsByEvent.Remove(emptyEventIds[i]);
+					string eventId = emptyEventIds[i];
+					_subscriptionsByEvent.Remove(eventId);
+					_snapshotByEvent.Remove(eventId);
 				}
 			}
 
@@ -75,6 +81,11 @@ internal sealed class EventBusRegistry
 				return Array.Empty<EventSubscription>();
 			}
 
+			if (_snapshotByEvent.TryGetValue(eventId, out EventSubscription[]? cachedSnapshot))
+			{
+				return cachedSnapshot;
+			}
+
 			EventSubscription[] snapshot = new EventSubscription[listeners.Count];
 			int index = 0;
 			foreach ((_, EventSubscription subscription) in listeners)
@@ -82,6 +93,7 @@ internal sealed class EventBusRegistry
 				snapshot[index++] = subscription;
 			}
 
+			_snapshotByEvent[eventId] = snapshot;
 			return snapshot;
 		}
 	}

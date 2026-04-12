@@ -12,6 +12,8 @@ public sealed class EmbeddedPackageReader
 {
 	private readonly Assembly _assembly;
 	private readonly Dictionary<string, string> _pathToResource = new(StringComparer.OrdinalIgnoreCase);
+	private readonly object _bytesCacheSync = new();
+	private readonly Dictionary<string, byte[]> _resourceBytesCache = new(StringComparer.OrdinalIgnoreCase);
 
 	public EmbeddedPackageReader(Assembly assembly)
 	{
@@ -31,6 +33,15 @@ public sealed class EmbeddedPackageReader
 	{
 		bytes = Array.Empty<byte>();
 		string normalized = ResourcePathResolver.NormalizeToRelative(resourcePath);
+		lock (_bytesCacheSync)
+		{
+			if (_resourceBytesCache.TryGetValue(normalized, out byte[]? cached))
+			{
+				bytes = cached;
+				return true;
+			}
+		}
+
 		if (!_pathToResource.TryGetValue(normalized, out string? resourceName))
 		{
 			return false;
@@ -45,6 +56,10 @@ public sealed class EmbeddedPackageReader
 		using MemoryStream memory = new();
 		stream.CopyTo(memory);
 		bytes = memory.ToArray();
+		lock (_bytesCacheSync)
+		{
+			_resourceBytesCache[normalized] = bytes;
+		}
 		return true;
 	}
 

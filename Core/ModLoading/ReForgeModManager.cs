@@ -28,6 +28,11 @@ public static class ReForgeModManager
 	private static readonly EmbeddedResourceSource EmbeddedSource = new();
 	private static readonly ReForgeModLifecycle Lifecycle = new(FileIo, Diagnostics, PckSource, EmbeddedSource);
 	private static readonly List<ReForgeModContext> Contexts = new();
+	private static readonly object ResourceCacheSync = new();
+	private static readonly Dictionary<string, byte[]> ResourceBytesCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly HashSet<string> ResourceMissCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly Dictionary<string, Texture2D> TextureCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly HashSet<string> TextureMissCache = new(StringComparer.OrdinalIgnoreCase);
 	private static ReForgeModSettings _activeSettings = ReForgeModSettingsStore.Clone(ReForgeModSettings.Default);
 
 	public static event Action<ReForgeModContext>? OnModDetected;
@@ -40,6 +45,7 @@ public static class ReForgeModManager
 		}
 
 		_initialized = true;
+		ClearResourceCaches();
 		ReForgeModSettings actualSettings = settings ?? ReForgeModSettingsStore.Load();
 		actualSettings = MergeWithOfficialModSettings(actualSettings);
 		_activeSettings = ReForgeModSettingsStore.Clone(actualSettings);
@@ -586,6 +592,7 @@ public static class ReForgeModManager
 
 		string modId = manifest.Id;
 		SetModEnabledForNextLaunch(modId, enabled: true);
+		ClearResourceCaches();
 
 		ReForgeModContext? loadedContext = Contexts.FirstOrDefault(mod => mod.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase)
 			&& mod.State == ReForgeModLoadState.Loaded);
@@ -806,28 +813,59 @@ public static class ReForgeModManager
 		}
 
 		string normalized = ResourcePathResolver.Normalize(resourcePath);
+		lock (ResourceCacheSync)
+		{
+			if (ResourceBytesCache.TryGetValue(normalized, out byte[]? cachedBytes))
+			{
+				bytes = cachedBytes;
+				return true;
+			}
+
+			if (ResourceMissCache.Contains(normalized))
+			{
+				return false;
+			}
+		}
+
 		if (preferredMod != null && TryReadFromMod(preferredMod, normalized, out bytes))
 		{
+			CacheResourceHit(normalized, bytes);
 			return true;
 		}
 
+		ReForgeModContext? owner = null;
 		string? ownerModId = ResourcePathResolver.ResolveOwnerModId(normalized);
 		if (!string.IsNullOrWhiteSpace(ownerModId))
 		{
-			ReForgeModContext? owner = Contexts.FirstOrDefault(m => m.ModId.Equals(ownerModId, StringComparison.OrdinalIgnoreCase));
+			owner = Contexts.FirstOrDefault(m => m.ModId.Equals(ownerModId, StringComparison.OrdinalIgnoreCase));
 			if (owner != null && TryReadFromMod(owner, normalized, out bytes))
 			{
+				CacheResourceHit(normalized, bytes);
 				return true;
 			}
 		}
 
-		foreach (ReForgeModContext mod in Contexts.Where(CanReadResourcesFromMod))
+		for (int i = 0; i < Contexts.Count; i++)
 		{
+			ReForgeModContext mod = Contexts[i];
+			if (!CanReadResourcesFromMod(mod))
+			{
+				continue;
+			}
+
+			if (ReferenceEquals(mod, preferredMod) || ReferenceEquals(mod, owner))
+			{
+				continue;
+			}
+
 			if (TryReadFromMod(mod, normalized, out bytes))
 			{
+				CacheResourceHit(normalized, bytes);
 				return true;
 			}
 		}
+
+		CacheResourceMiss(normalized);
 
 		return false;
 	}
@@ -840,19 +878,77 @@ public static class ReForgeModManager
 	public static bool TryLoadTexture(string resourcePath, out Texture2D texture)
 	{
 		texture = null!;
-		if (!TryReadResourceBytes(resourcePath, out byte[] bytes))
+		string normalized = ResourcePathResolver.Normalize(resourcePath);
+		lock (ResourceCacheSync)
 		{
+			if (TextureCache.TryGetValue(normalized, out Texture2D? cached)
+				&& GodotObject.IsInstanceValid(cached))
+			{
+				texture = cached;
+				return true;
+			}
+
+			TextureCache.Remove(normalized);
+			if (TextureMissCache.Contains(normalized))
+			{
+				return false;
+			}
+		}
+
+		if (!TryReadResourceBytes(normalized, out byte[] bytes))
+		{
+			lock (ResourceCacheSync)
+			{
+				TextureMissCache.Add(normalized);
+			}
 			return false;
 		}
 
 		Godot.Image image = new();
 		if (image.LoadPngFromBuffer(bytes) != Error.Ok)
 		{
+			lock (ResourceCacheSync)
+			{
+				TextureMissCache.Add(normalized);
+			}
 			return false;
 		}
 
 		texture = ImageTexture.CreateFromImage(image);
+		lock (ResourceCacheSync)
+		{
+			TextureCache[normalized] = texture;
+			TextureMissCache.Remove(normalized);
+		}
 		return true;
+	}
+
+	private static void CacheResourceHit(string normalizedPath, byte[] bytes)
+	{
+		lock (ResourceCacheSync)
+		{
+			ResourceBytesCache[normalizedPath] = bytes;
+			ResourceMissCache.Remove(normalizedPath);
+		}
+	}
+
+	private static void CacheResourceMiss(string normalizedPath)
+	{
+		lock (ResourceCacheSync)
+		{
+			ResourceMissCache.Add(normalizedPath);
+		}
+	}
+
+	private static void ClearResourceCaches()
+	{
+		lock (ResourceCacheSync)
+		{
+			ResourceBytesCache.Clear();
+			ResourceMissCache.Clear();
+			TextureCache.Clear();
+			TextureMissCache.Clear();
+		}
 	}
 
 	private static bool TryReadFromMod(ReForgeModContext mod, string normalizedPath, out byte[] bytes)
@@ -898,6 +994,7 @@ public static class ReForgeModManager
 	{
 		try
 		{
+			ClearResourceCaches();
 			LocalizationResourceBridge.RefreshCurrentLanguage();
 
 			if (LocManager.Instance != null)

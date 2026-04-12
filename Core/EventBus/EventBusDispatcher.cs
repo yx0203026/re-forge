@@ -9,6 +9,8 @@ namespace ReForgeFramework.EventBus;
 internal sealed class EventBusDispatcher
 {
 	private readonly EventBusRegistry _registry;
+	private readonly object _mismatchSyncRoot = new();
+	private readonly HashSet<string> _loggedTypeMismatches = new(StringComparer.Ordinal);
 
 	public EventBusDispatcher(EventBusRegistry registry)
 	{
@@ -33,7 +35,17 @@ internal sealed class EventBusDispatcher
 			{
 				string actualType = eventArg?.GetType().FullName ?? "<null>";
 				string expectedType = subscription.ParameterType?.FullName ?? "<none>";
-				GD.Print($"[ReForge.EventBus] Type mismatch. eventId='{eventId}', busId='{subscription.BusId}', expected='{expectedType}', actual='{actualType}'.");
+				string mismatchKey = string.Concat(eventId, "\u001f", subscription.BusId, "\u001f", expectedType, "\u001f", actualType);
+				bool shouldLog;
+				lock (_mismatchSyncRoot)
+				{
+					shouldLog = _loggedTypeMismatches.Add(mismatchKey);
+				}
+
+				if (shouldLog)
+				{
+					GD.Print($"[ReForge.EventBus] Type mismatch. eventId='{eventId}', busId='{subscription.BusId}', expected='{expectedType}', actual='{actualType}'.");
+				}
 				continue;
 			}
 
