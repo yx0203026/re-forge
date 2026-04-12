@@ -55,6 +55,7 @@ public static partial class ReForge
 		}
 
 		EventBus.Initialize();
+		Network.Initialize();
 		ReForgeModManager.Initialize();
 		SchedulePostInitialization();
 		GD.Print("[ReForge] initialized.");
