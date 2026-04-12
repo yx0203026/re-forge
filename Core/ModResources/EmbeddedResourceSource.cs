@@ -17,7 +17,7 @@ public sealed class EmbeddedResourceSource : IModResourceSource
 	public bool CanHandle(ReForgeModContext mod)
 	{
 		ArgumentNullException.ThrowIfNull(mod);
-		return mod.Manifest.HasEmbeddedResources || !mod.Manifest.HasPck;
+		return mod.Manifest.HasEmbeddedResources;
 	}
 
 	public bool Prepare(ReForgeModContext mod, ReForgeModDiagnostics diagnostics)

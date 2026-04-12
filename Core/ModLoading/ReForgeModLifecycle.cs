@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
@@ -16,6 +17,9 @@ namespace ReForgeFramework.ModLoading;
 
 public sealed class ReForgeModLifecycle
 {
+	private const string ReForgeModsDirectoryName = "ReForgeMods";
+	private const string ZipCacheDirectoryName = "zip_cache";
+
 	private readonly ReForgeModFileIo _fileIo;
 	private readonly ReForgeModDiagnostics _diagnostics;
 	private readonly PckResourceSource _pckSource;
@@ -43,13 +47,12 @@ public sealed class ReForgeModLifecycle
 			return results;
 		}
 
-		string modsRoot = Path.Combine(gameDirectory, "mods");
-		if (!_fileIo.DirectoryExists(modsRoot))
-		{
-			return results;
-		}
+		string reforgeModsRoot = Path.Combine(gameDirectory, ReForgeModsDirectoryName);
+		EnsureReForgeModsDirectory(reforgeModsRoot);
 
-		ReadModsInDirRecursive(modsRoot, results);
+		ReadModsInDirRecursive(reforgeModsRoot, results);
+		ReadModsFromZipPackages(reforgeModsRoot, results);
+		ReadDerivedModsFromSiblingDirectory(results);
 		return results;
 	}
 
@@ -286,8 +289,8 @@ public sealed class ReForgeModLifecycle
 			return true;
 		}
 
-		string assemblyPath = Path.Combine(mod.ModPath, mod.ModId + ".dll");
-		if (_fileIo.FileExists(assemblyPath))
+		string? assemblyPath = ResolveAssemblyPath(mod);
+		if (!string.IsNullOrWhiteSpace(assemblyPath) && _fileIo.FileExists(assemblyPath))
 		{
 			AssemblyLoadContext? loadContext = AssemblyLoadContext.GetLoadContext(Assembly.GetExecutingAssembly());
 			if (loadContext == null)
@@ -308,8 +311,209 @@ public sealed class ReForgeModLifecycle
 			return true;
 		}
 
-		MarkFailed(mod, $"Manifest requires DLL but file not found: {assemblyPath}");
+		MarkFailed(mod, $"Manifest requires DLL but no suitable DLL was found under: {mod.ModPath}");
 		return false;
+	}
+
+	private static void EnsureReForgeModsDirectory(string reforgeModsRoot)
+	{
+		try
+		{
+			if (Directory.Exists(reforgeModsRoot))
+			{
+				return;
+			}
+
+			Directory.CreateDirectory(reforgeModsRoot);
+			GD.Print($"[ReForge.ModLoader] Created ReForge mods directory: {reforgeModsRoot}");
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.ModLoader] Failed to create ReForgeMods directory '{reforgeModsRoot}': {ex.Message}");
+		}
+	}
+
+	private void ReadModsFromZipPackages(string reforgeModsRoot, List<ReForgeModContext> results)
+	{
+		if (!_fileIo.DirectoryExists(reforgeModsRoot))
+		{
+			return;
+		}
+
+		string[] zipPaths;
+		try
+		{
+			zipPaths = Directory.GetFiles(reforgeModsRoot, "*.zip", SearchOption.TopDirectoryOnly);
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.ModLoader] Failed to enumerate zip packages under '{reforgeModsRoot}': {ex.Message}");
+			return;
+		}
+
+		if (zipPaths.Length == 0)
+		{
+			return;
+		}
+
+		string extractionRoot = Path.Combine(Path.GetTempPath(), "ReForge", ZipCacheDirectoryName, Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(extractionRoot);
+
+		foreach (string zipPath in zipPaths)
+		{
+			try
+			{
+				string packageName = Path.GetFileNameWithoutExtension(zipPath);
+				string folderName = BuildZipExtractFolderName(packageName, zipPath);
+				string packageExtractRoot = Path.Combine(extractionRoot, folderName);
+				Directory.CreateDirectory(packageExtractRoot);
+
+				ZipFile.ExtractToDirectory(zipPath, packageExtractRoot, overwriteFiles: true);
+				ReadModsInDirRecursive(packageExtractRoot, results);
+			}
+			catch (Exception ex)
+			{
+				string packageName = Path.GetFileName(zipPath);
+				GD.PrintErr($"[ReForge.ModLoader] Failed to process zip package '{packageName}': {ex.Message}");
+			}
+		}
+	}
+
+	private void ReadDerivedModsFromSiblingDirectory(List<ReForgeModContext> results)
+	{
+		string selfAssemblyPath = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
+		string? siblingDirectory = Path.GetDirectoryName(selfAssemblyPath);
+		if (string.IsNullOrWhiteSpace(siblingDirectory) || !_fileIo.DirectoryExists(siblingDirectory))
+		{
+			return;
+		}
+
+		foreach (string fileName in _fileIo.GetFilesAt(siblingDirectory))
+		{
+			if (!fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string dllPath = Path.Combine(siblingDirectory, fileName);
+			string fullDllPath = Path.GetFullPath(dllPath);
+			if (fullDllPath.Equals(selfAssemblyPath, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string modId = Path.GetFileNameWithoutExtension(fileName) ?? string.Empty;
+			if (string.IsNullOrWhiteSpace(modId))
+			{
+				continue;
+			}
+
+			string companionManifestPath = Path.Combine(siblingDirectory, modId + ".json");
+			ReForgeModContext? context = null;
+			if (_fileIo.FileExists(companionManifestPath))
+			{
+				context = TryReadManifest(companionManifestPath);
+			}
+
+			context ??= BuildDerivedModContext(modId, siblingDirectory, dllPath);
+
+			if (results.Any(existing => existing.ModId.Equals(context.ModId, StringComparison.OrdinalIgnoreCase)))
+			{
+				continue;
+			}
+
+			results.Add(context);
+		}
+	}
+
+	private ReForgeModContext BuildDerivedModContext(string modId, string modPath, string dllPath)
+	{
+		ReForgeModManifest manifest = new()
+		{
+			Id = modId,
+			Name = modId,
+			Author = "ReForge.Derived",
+			Description = "Compatibility-mode derivative mod discovered from ReForge.dll sibling directory.",
+			Version = "compat",
+			HasPck = false,
+			HasDll = true,
+			HasEmbeddedResources = true,
+			Dependencies = new List<string>(),
+			AffectsGameplay = false
+		};
+
+		ReForgeModContext context = new()
+		{
+			ModId = modId,
+			ManifestPath = "[derived]",
+			ModPath = modPath,
+			Manifest = manifest,
+			State = ReForgeModLoadState.None,
+			SourceKind = ReForgeModSourceKind.Unknown
+		};
+
+		_diagnostics.TrackPhase(context.ModId, ReForgeModPhase.Discovery, context.State, $"Detected derivative sibling dll: {dllPath}");
+		return context;
+	}
+
+	private static string BuildZipExtractFolderName(string packageName, string zipPath)
+	{
+		FileInfo info = new(zipPath);
+		string safeName = SanitizePathSegment(packageName);
+		return $"{safeName}_{info.Length}_{info.LastWriteTimeUtc.Ticks:X}";
+	}
+
+	private static string SanitizePathSegment(string value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			return "package";
+		}
+
+		char[] chars = value.ToCharArray();
+		for (int i = 0; i < chars.Length; i++)
+		{
+			char current = chars[i];
+			if (char.IsLetterOrDigit(current) || current == '_' || current == '-')
+			{
+				continue;
+			}
+
+			chars[i] = '_';
+		}
+
+		string sanitized = new string(chars).Trim('_');
+		return string.IsNullOrWhiteSpace(sanitized) ? "package" : sanitized;
+	}
+
+	private string? ResolveAssemblyPath(ReForgeModContext mod)
+	{
+		string byModId = Path.Combine(mod.ModPath, mod.ModId + ".dll");
+		if (_fileIo.FileExists(byModId))
+		{
+			return byModId;
+		}
+
+		if (!string.IsNullOrWhiteSpace(mod.ManifestPath) && !mod.ManifestPath.StartsWith("[", StringComparison.Ordinal))
+		{
+			string manifestNamedDll = Path.Combine(mod.ModPath, Path.GetFileNameWithoutExtension(mod.ManifestPath) + ".dll");
+			if (_fileIo.FileExists(manifestNamedDll))
+			{
+				return manifestNamedDll;
+			}
+		}
+
+		string[] dllCandidates = _fileIo
+			.GetFilesAt(mod.ModPath)
+			.Where(name => name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+			.ToArray();
+
+		if (dllCandidates.Length == 1)
+		{
+			return Path.Combine(mod.ModPath, dllCandidates[0]);
+		}
+
+		return null;
 	}
 
 	private bool BindResourceSource(ReForgeModContext mod)
@@ -358,9 +562,9 @@ public sealed class ReForgeModLifecycle
 			{
 				foreach (Type type in initializerTypes)
 				{
-					if (!CallModInitializer(type))
+					if (!CallModInitializer(type, out string failureReason))
 					{
-						MarkFailed(mod, $"Initializer invocation failed for type: {type.FullName}");
+						MarkFailed(mod, $"Initializer invocation failed for type: {type.FullName}. {failureReason}");
 						return false;
 					}
 				}
@@ -376,27 +580,50 @@ public sealed class ReForgeModLifecycle
 		}
 		catch (Exception ex)
 		{
-			MarkFailed(mod, $"Initializer execution exception: {ex.GetType().Name}, {ex.Message}");
+			MarkFailed(mod, $"Initializer execution exception: {FormatExceptionForDiagnostics(ex)}");
 			return false;
 		}
 	}
 
-	private static bool CallModInitializer(Type initializerType)
+	private static bool CallModInitializer(Type initializerType, out string failureReason)
 	{
+		failureReason = string.Empty;
+
 		ModInitializerAttribute? attribute = initializerType.GetCustomAttribute<ModInitializerAttribute>();
 		if (attribute == null)
 		{
+			failureReason = "Missing ModInitializerAttribute on initializer type.";
 			return false;
 		}
 
 		MethodInfo? method = initializerType.GetMethod(attribute.initializerMethod, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 		if (method == null)
 		{
+			failureReason = $"Method '{attribute.initializerMethod}' was not found on type '{initializerType.FullName}'.";
 			return false;
 		}
 
-		method.Invoke(null, null);
-		return true;
+		try
+		{
+			method.Invoke(null, null);
+			return true;
+		}
+		catch (TargetInvocationException ex)
+		{
+			Exception actual = ex.InnerException ?? ex;
+			failureReason = $"Exception while invoking '{initializerType.FullName}.{attribute.initializerMethod}': {FormatExceptionForDiagnostics(actual)}";
+			return false;
+		}
+		catch (Exception ex)
+		{
+			failureReason = $"Reflection invoke failed for '{initializerType.FullName}.{attribute.initializerMethod}': {FormatExceptionForDiagnostics(ex)}";
+			return false;
+		}
+	}
+
+	private static string FormatExceptionForDiagnostics(Exception exception)
+	{
+		return exception.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
 	}
 
 	private void MarkFailed(ReForgeModContext mod, string message)

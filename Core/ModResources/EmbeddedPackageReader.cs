@@ -78,7 +78,7 @@ public sealed class EmbeddedPackageReader
 		}
 	}
 
-	private static bool TryConvertConventionalName(string resourceName, out string? normalizedPath)
+	private bool TryConvertConventionalName(string resourceName, out string? normalizedPath)
 	{
 		normalizedPath = null;
 		if (string.IsNullOrWhiteSpace(resourceName))
@@ -86,19 +86,38 @@ public sealed class EmbeddedPackageReader
 			return false;
 		}
 
-		int marker = resourceName.IndexOf(".reforge.", StringComparison.OrdinalIgnoreCase);
-		if (marker < 0)
+		// 显式 LogicalName（包含斜杠）直接作为可读取路径。
+		if (resourceName.IndexOf('/', StringComparison.Ordinal) >= 0)
 		{
-			if (resourceName.StartsWith("reforge/", StringComparison.OrdinalIgnoreCase))
-			{
-				normalizedPath = resourceName;
-				return true;
-			}
-			return false;
+			normalizedPath = resourceName;
+			return true;
 		}
 
-		string tail = resourceName[(marker + 1)..];
-		string[] parts = tail.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		string candidate = resourceName;
+		string? assemblyName = _assembly.GetName().Name;
+		if (!string.IsNullOrWhiteSpace(assemblyName))
+		{
+			string assemblyPrefix = assemblyName + ".";
+			if (candidate.StartsWith(assemblyPrefix, StringComparison.OrdinalIgnoreCase))
+			{
+				candidate = candidate[assemblyPrefix.Length..];
+			}
+		}
+
+		// 兼容旧版路径（例如 ReForge.rewardrefresh.localization.xxx.json）。
+		int marker = candidate.IndexOf(".reforge.", StringComparison.OrdinalIgnoreCase);
+		if (marker >= 0)
+		{
+			candidate = candidate[(marker + 1)..];
+		}
+
+		if (candidate.StartsWith("reforge/", StringComparison.OrdinalIgnoreCase))
+		{
+			normalizedPath = candidate;
+			return true;
+		}
+
+		string[] parts = candidate.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 		if (parts.Length < 2)
 		{
 			return false;
