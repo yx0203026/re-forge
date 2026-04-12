@@ -118,14 +118,14 @@ public static class UiLocalization
 	{
 		EnsureOfficialBridge();
 
-		if (TryResolveOfficial(locTable, locEntryKey, key, out string officialText))
-		{
-			return officialText;
-		}
-
 		if (TryResolveEmbeddedLocalization(locTable, locEntryKey, key, out string embeddedText))
 		{
 			return embeddedText;
+		}
+
+		if (TryResolveOfficial(locTable, locEntryKey, key, out string officialText))
+		{
+			return officialText;
 		}
 
 		if (string.IsNullOrWhiteSpace(key))
