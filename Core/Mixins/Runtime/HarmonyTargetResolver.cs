@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 
@@ -24,6 +25,8 @@ namespace ReForgeFramework.Mixins.Runtime;
 /// </remarks>
 internal sealed class HarmonyTargetResolver
 {
+	private static readonly ConcurrentDictionary<Type, Dictionary<string, IReadOnlyList<MethodInfo>>> _methodCandidatesByType = new();
+
 	/// <summary>
 	/// 在目标类型中解析指定的目标方法。
 	/// </summary>
@@ -72,17 +75,10 @@ internal sealed class HarmonyTargetResolver
 			}
 		}
 
-		MethodInfo[] methods = targetType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-		List<MethodInfo> candidates = new();
-		for (int i = 0; i < methods.Length; i++)
+		Dictionary<string, IReadOnlyList<MethodInfo>> methodIndex = GetOrBuildMethodIndex(targetType);
+		if (!methodIndex.TryGetValue(targetMethodName, out IReadOnlyList<MethodInfo>? candidates))
 		{
-			MethodInfo method = methods[i];
-			if (!string.Equals(method.Name, targetMethodName, StringComparison.Ordinal))
-			{
-				continue;
-			}
-
-			candidates.Add(method);
+			candidates = Array.Empty<MethodInfo>();
 		}
 
 		if (candidates.Count == 0)
@@ -91,8 +87,6 @@ internal sealed class HarmonyTargetResolver
 				$"Target method not found. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', descriptorKey='{injection.DescriptorKey}'.";
 			return false;
 		}
-
-		candidates.Sort(static (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
 		if (injection.Ordinal >= 0)
 		{
@@ -116,5 +110,35 @@ internal sealed class HarmonyTargetResolver
 
 		targetMethod = candidates[0];
 		return true;
+	}
+
+	private static Dictionary<string, IReadOnlyList<MethodInfo>> GetOrBuildMethodIndex(Type targetType)
+	{
+		return _methodCandidatesByType.GetOrAdd(targetType, static type =>
+		{
+			MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+			Dictionary<string, List<MethodInfo>> groups = new(StringComparer.Ordinal);
+
+			for (int i = 0; i < methods.Length; i++)
+			{
+				MethodInfo method = methods[i];
+				if (!groups.TryGetValue(method.Name, out List<MethodInfo>? bucket))
+				{
+					bucket = new List<MethodInfo>();
+					groups[method.Name] = bucket;
+				}
+
+				bucket.Add(method);
+			}
+
+			Dictionary<string, IReadOnlyList<MethodInfo>> result = new(StringComparer.Ordinal);
+			foreach ((string name, List<MethodInfo> bucket) in groups)
+			{
+				bucket.Sort(static (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+				result[name] = bucket;
+			}
+
+			return result;
+		});
 	}
 }

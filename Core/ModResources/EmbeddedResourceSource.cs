@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using ReForgeFramework.ModLoading;
 
@@ -17,7 +18,12 @@ public sealed class EmbeddedResourceSource : IModResourceSource
 	public bool CanHandle(ReForgeModContext mod)
 	{
 		ArgumentNullException.ThrowIfNull(mod);
-		return mod.Manifest.HasEmbeddedResources;
+		if (!mod.Manifest.HasEmbeddedResources)
+		{
+			return false;
+		}
+
+		return HasExplicitReForgeReference(mod.Assembly, mod.ModId);
 	}
 
 	public bool Prepare(ReForgeModContext mod, ReForgeModDiagnostics diagnostics)
@@ -77,5 +83,24 @@ public sealed class EmbeddedResourceSource : IModResourceSource
 		}
 
 		return bytes;
+	}
+
+	private static bool HasExplicitReForgeReference(Assembly? assembly, string modId)
+	{
+		if (assembly == null)
+		{
+			return false;
+		}
+
+		if (modId.Equals("reforge", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		return assembly
+			.GetReferencedAssemblies()
+			.Any(static referenced =>
+				string.Equals(referenced.Name, "ReForge", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(referenced.Name, "ReForgeFramework", StringComparison.OrdinalIgnoreCase));
 	}
 }

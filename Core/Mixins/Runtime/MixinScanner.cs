@@ -159,11 +159,6 @@ internal sealed class MixinScanner
 		List<MixinDescriptor> descriptors,
 		List<MixinScanDiagnostic> diagnostics)
 	{
-		if (!Attribute.IsDefined(mixinType, typeof(global::ReForge.MixinAttribute), inherit: false))
-		{
-			return;
-		}
-
 		object[] mixinAttributes = mixinType.GetCustomAttributes(typeof(global::ReForge.MixinAttribute), inherit: false);
 		if (mixinAttributes.Length == 0)
 		{
@@ -216,11 +211,6 @@ internal sealed class MixinScanner
 		for (int i = 0; i < methods.Length; i++)
 		{
 			MethodInfo handlerMethod = methods[i];
-			if (!Attribute.IsDefined(handlerMethod, typeof(global::ReForge.InjectionAttributeBase), inherit: false))
-			{
-				continue;
-			}
-
 			object[] attributes = handlerMethod.GetCustomAttributes(typeof(global::ReForge.InjectionAttributeBase), inherit: false);
 			if (attributes.Length == 0)
 			{
@@ -315,11 +305,6 @@ internal sealed class MixinScanner
 		for (int i = 0; i < fields.Length; i++)
 		{
 			FieldInfo mixinField = fields[i];
-			if (!Attribute.IsDefined(mixinField, typeof(global::ReForge.ShadowAttribute), inherit: false))
-			{
-				continue;
-			}
-
 			object[] attributes = mixinField.GetCustomAttributes(typeof(global::ReForge.ShadowAttribute), inherit: false);
 			if (attributes.Length == 0)
 			{

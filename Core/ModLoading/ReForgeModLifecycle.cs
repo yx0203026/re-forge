@@ -518,21 +518,27 @@ public sealed class ReForgeModLifecycle
 
 	private bool BindResourceSource(ReForgeModContext mod)
 	{
-		if (mod.Manifest.HasPck && _pckSource.CanHandle(mod) && _pckSource.Prepare(mod, _diagnostics))
+		if (mod.Manifest.HasPck && _pckSource.CanHandle(mod))
 		{
-			mod.SourceKind = ReForgeModSourceKind.Pck;
-			return true;
+			if (_pckSource.Prepare(mod, _diagnostics))
+			{
+				mod.SourceKind = ReForgeModSourceKind.Pck;
+				return true;
+			}
+
+			MarkFailed(mod, "PCK resource source could not be prepared.");
+			return false;
 		}
 
-		if (_embeddedSource.CanHandle(mod) && _embeddedSource.Prepare(mod, _diagnostics))
+		if (_embeddedSource.CanHandle(mod))
 		{
-			mod.SourceKind = ReForgeModSourceKind.Embedded;
-			return true;
-		}
+			if (_embeddedSource.Prepare(mod, _diagnostics))
+			{
+				mod.SourceKind = ReForgeModSourceKind.Embedded;
+				return true;
+			}
 
-		if (mod.Manifest.HasPck || mod.Manifest.HasEmbeddedResources)
-		{
-			MarkFailed(mod, "No resource source could be prepared.");
+			MarkFailed(mod, "Embedded resource source could not be prepared.");
 			return false;
 		}
 

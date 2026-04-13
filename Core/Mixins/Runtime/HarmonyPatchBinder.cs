@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Reflection;
@@ -177,6 +178,8 @@ public sealed class MixinPatchBindResult
 /// </remarks>
 internal sealed class HarmonyPatchBinder
 {
+	private static readonly ConcurrentDictionary<Type, Dictionary<string, FieldInfo>> _targetFieldMapByType = new();
+
 	private readonly HarmonyTargetResolver _targetResolver = new();
 	private readonly MixinConflictPolicy _conflictPolicy;
 	private readonly MixinAppliedRegistry _appliedRegistry;
@@ -846,22 +849,15 @@ internal sealed class HarmonyPatchBinder
 			return false;
 		}
 
-		const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-		FieldInfo[] targetFields = descriptor.TargetType.GetFields(Flags);
+		Dictionary<string, FieldInfo> targetFieldMap = GetOrBuildTargetFieldMap(descriptor.TargetType);
 
 		for (int i = 0; i < candidates.Count; i++)
 		{
 			string candidate = candidates[i];
-			for (int j = 0; j < targetFields.Length; j++)
+			if (targetFieldMap.TryGetValue(candidate, out FieldInfo? resolved))
 			{
-				FieldInfo field = targetFields[j];
-				if (!string.Equals(field.Name, candidate, StringComparison.Ordinal))
-				{
-					continue;
-				}
-
 				resolvedTargetName = candidate;
-				targetField = field;
+				targetField = resolved;
 				return true;
 			}
 		}
@@ -870,6 +866,27 @@ internal sealed class HarmonyPatchBinder
 		error =
 			$"Target field not found. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', candidates='{string.Join("|", candidates)}'.";
 		return false;
+	}
+
+	private static Dictionary<string, FieldInfo> GetOrBuildTargetFieldMap(Type targetType)
+	{
+		return _targetFieldMapByType.GetOrAdd(targetType, static type =>
+		{
+			const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+			FieldInfo[] fields = type.GetFields(flags);
+			Dictionary<string, FieldInfo> map = new(StringComparer.Ordinal);
+
+			for (int i = 0; i < fields.Length; i++)
+			{
+				FieldInfo field = fields[i];
+				if (!map.ContainsKey(field.Name))
+				{
+					map[field.Name] = field;
+				}
+			}
+
+			return map;
+		});
 	}
 
 	private static List<string> BuildShadowCandidates(ShadowFieldDescriptor shadow)

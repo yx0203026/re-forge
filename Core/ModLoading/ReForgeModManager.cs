@@ -146,7 +146,6 @@ public static class ReForgeModManager
 		ResolveReferencePaths(
 			gameRoot,
 			out string reforgeDllPath,
-			out string harmonyDllPath,
 			out string sts2DllPath);
 
 		if (Directory.Exists(modRoot))
@@ -172,7 +171,6 @@ public static class ReForgeModManager
 			string csproj = BuildProjectFileText(
 				resourceFolderName,
 				reforgeDllPath,
-				harmonyDllPath,
 				sts2DllPath);
 			File.WriteAllText(projectFilePath, csproj, Encoding.UTF8);
 
@@ -1291,7 +1289,6 @@ public static class ReForgeModManager
 	private static string BuildProjectFileText(
 		string resourceFolderName,
 		string reforgeDllPath,
-		string harmonyDllPath,
 		string sts2DllPath)
 	{
 		StringBuilder builder = new();
@@ -1307,10 +1304,6 @@ public static class ReForgeModManager
 		builder.AppendLine("  <ItemGroup>");
 		builder.AppendLine("    <Reference Include=\"ReForge\">");
 		builder.AppendLine($"      <HintPath>{EscapeXmlValue(reforgeDllPath)}</HintPath>");
-		builder.AppendLine("      <Private>false</Private>");
-		builder.AppendLine("    </Reference>");
-		builder.AppendLine("    <Reference Include=\"0Harmony\">");
-		builder.AppendLine($"      <HintPath>{EscapeXmlValue(harmonyDllPath)}</HintPath>");
 		builder.AppendLine("      <Private>false</Private>");
 		builder.AppendLine("    </Reference>");
 		builder.AppendLine("    <Reference Include=\"sts2\">");
@@ -1332,13 +1325,11 @@ public static class ReForgeModManager
 	private static void ResolveReferencePaths(
 		string gameRoot,
 		out string reforgeDllPath,
-		out string harmonyDllPath,
 		out string sts2DllPath)
 	{
 		reforgeDllPath = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
 
 		string dataDirectory = Path.Combine(gameRoot, "data_sts2_windows_x86_64");
-		harmonyDllPath = Path.GetFullPath(Path.Combine(dataDirectory, "0Harmony.dll"));
 		sts2DllPath = Path.GetFullPath(Path.Combine(dataDirectory, "sts2.dll"));
 	}
 
@@ -1382,32 +1373,34 @@ public static class ReForgeModManager
 	private static string BuildModMainText(string modName)
 	{
 		string modNamespace = BuildCSharpIdentifier(modName) + ".Generated";
-		string harmonyId = BuildResourceFolderName(modName) + ".mod";
+		string modId = BuildResourceFolderName(modName) + ".mod";
 
 		StringBuilder builder = new();
-		builder.AppendLine("using Godot;");
-		builder.AppendLine("using HarmonyLib;");
 		builder.AppendLine("using MegaCrit.Sts2.Core.Modding;");
+		builder.AppendLine("using MegaCrit.Sts2.Core.Runs;");
 		builder.AppendLine();
 		builder.Append("namespace ").Append(modNamespace).AppendLine(";");
 		builder.AppendLine();
 		builder.AppendLine("[ModInitializer(nameof(Initialize))]");
-		builder.AppendLine("public static class ModMain");
+		builder.AppendLine("public sealed class ModMain : ReForgeModBase");
 		builder.AppendLine("{");
-		builder.AppendLine("\tprivate static bool _initialized;");
-		builder.AppendLine("\tprivate static Harmony? _harmony;");
+		builder.Append("\tprotected override string ModId => \"").Append(modId).AppendLine("\";");
 		builder.AppendLine();
 		builder.AppendLine("\tprivate static void Initialize()");
 		builder.AppendLine("\t{");
-		builder.AppendLine("\t\tif (_initialized)");
-		builder.AppendLine("\t\t{");
-		builder.AppendLine("\t\t\treturn;");
-		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t\tBootstrap<ModMain>();");
+		builder.AppendLine("\t}");
 		builder.AppendLine();
-		builder.AppendLine("\t\t_initialized = true;");
-		builder.Append("\t\t_harmony = new Harmony(\"").Append(harmonyId).AppendLine("\");");
-		builder.AppendLine("\t\t_harmony.PatchAll();");
-		builder.Append("\t\tGD.Print(\"[").Append(harmonyId).AppendLine("] initialized.\");");
+		builder.AppendLine("\tprotected override bool EnableRunStartedHook => true;");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override void OnInitialize()");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\t// TODO: mod startup logic");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override void OnRunStarted(RunState _)");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\t// TODO: run-start logic");
 		builder.AppendLine("\t}");
 		builder.AppendLine("}");
 
