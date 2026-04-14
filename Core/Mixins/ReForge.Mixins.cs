@@ -27,7 +27,7 @@ public static partial class ReForge
 	/// • Shadow 字段映射：通过 <see cref="global::ReForge.ShadowAttribute"/> 访问目标类型私有字段
 	/// • 诊断支持：<see cref="GetStatus"/>、<see cref="GetDiagnosticsSnapshot"/>
 	/// </remarks>
-	public static class Mixins
+	public static partial class Mixins
 	{
 		private static readonly object SyncRoot = new();
 		private static readonly Dictionary<string, MixinRegistrationResult> Registrations = new(StringComparer.Ordinal);
@@ -314,7 +314,12 @@ public static partial class ReForge
 			MixinStatusSnapshot registrationStatus = GetStatus();
 			MixinLifecycleSnapshot lifecycleSnapshot = LifecycleManager.Snapshot();
 			IReadOnlyList<MixinAppliedEntry> appliedEntries = LifecycleManager.GetAppliedEntries();
-			return Diagnostics.BuildSnapshot(registrationStatus, lifecycleSnapshot, appliedEntries);
+			return Diagnostics.BuildSnapshot(
+				registrationStatus,
+				lifecycleSnapshot,
+				appliedEntries,
+				LifecycleManager.GetReflectionRuntimeSnapshot()
+			);
 		}
 
 		/// <summary>

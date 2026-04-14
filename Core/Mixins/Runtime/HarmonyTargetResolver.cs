@@ -1,9 +1,8 @@
 #nullable enable
 
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Reflection;
+using ReForgeFramework.Mixins.Runtime.Reflection;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
@@ -25,7 +24,12 @@ namespace ReForgeFramework.Mixins.Runtime;
 /// </remarks>
 internal sealed class HarmonyTargetResolver
 {
-	private static readonly ConcurrentDictionary<Type, Dictionary<string, IReadOnlyList<MethodInfo>>> _methodCandidatesByType = new();
+	private readonly IReflectionAccessor _reflectionAccessor;
+
+	public HarmonyTargetResolver(IReflectionAccessor? reflectionAccessor = null)
+	{
+		_reflectionAccessor = reflectionAccessor ?? new ReflectionAccessor();
+	}
 
 	/// <summary>
 	/// 在目标类型中解析指定的目标方法。
@@ -64,81 +68,34 @@ internal sealed class HarmonyTargetResolver
 			return false;
 		}
 
-		if (injection.TargetMethod != null)
+		string signatureKey = injection.TargetMethodSignatureKey;
+		if (string.IsNullOrWhiteSpace(signatureKey) && injection.TargetMethod != null)
 		{
-			if (string.Equals(injection.TargetMethod.Name, targetMethodName, StringComparison.Ordinal)
-				&& injection.TargetMethod.DeclaringType != null
-				&& injection.TargetMethod.DeclaringType.IsAssignableFrom(targetType))
-			{
-				targetMethod = injection.TargetMethod;
-				return true;
-			}
+			signatureKey = ReflectionSignatureBuilder.BuildMethodSignature(injection.TargetMethod);
 		}
 
-		Dictionary<string, IReadOnlyList<MethodInfo>> methodIndex = GetOrBuildMethodIndex(targetType);
-		if (!methodIndex.TryGetValue(targetMethodName, out IReadOnlyList<MethodInfo>? candidates))
-		{
-			candidates = Array.Empty<MethodInfo>();
-		}
+		ReflectionMemberKey key = new(
+			targetType,
+			targetMethodName,
+			ReflectionMemberKind.Method,
+			signatureKey,
+			injection.Ordinal);
+		ReflectionAccessContext context = new(
+			Owner: nameof(HarmonyTargetResolver),
+			Operation: nameof(TryResolveTargetMethod),
+			DescriptorKey: injection.DescriptorKey,
+			Notes: descriptor.MixinId);
 
-		if (candidates.Count == 0)
+		if (!_reflectionAccessor.TryResolveMethod(key, context, out MethodInfo? resolvedMethod, out ReflectionAccessError? accessError)
+			|| resolvedMethod == null)
 		{
+			string accessMessage = accessError?.ToString() ?? "Unknown reflection resolve error.";
 			error =
-				$"Target method not found. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', descriptorKey='{injection.DescriptorKey}'.";
+				$"Target method resolution failed. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', descriptorKey='{injection.DescriptorKey}'. detail={accessMessage}";
 			return false;
 		}
 
-		if (injection.Ordinal >= 0)
-		{
-			if (injection.Ordinal >= candidates.Count)
-			{
-				error =
-					$"Target method ordinal out of range. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', ordinal={injection.Ordinal}, candidateCount={candidates.Count}, descriptorKey='{injection.DescriptorKey}'.";
-				return false;
-			}
-
-			targetMethod = candidates[injection.Ordinal];
-			return true;
-		}
-
-		if (candidates.Count > 1)
-		{
-			error =
-				$"Target method is ambiguous; set Ordinal explicitly. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', candidateCount={candidates.Count}, descriptorKey='{injection.DescriptorKey}'.";
-			return false;
-		}
-
-		targetMethod = candidates[0];
+		targetMethod = resolvedMethod;
 		return true;
-	}
-
-	private static Dictionary<string, IReadOnlyList<MethodInfo>> GetOrBuildMethodIndex(Type targetType)
-	{
-		return _methodCandidatesByType.GetOrAdd(targetType, static type =>
-		{
-			MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-			Dictionary<string, List<MethodInfo>> groups = new(StringComparer.Ordinal);
-
-			for (int i = 0; i < methods.Length; i++)
-			{
-				MethodInfo method = methods[i];
-				if (!groups.TryGetValue(method.Name, out List<MethodInfo>? bucket))
-				{
-					bucket = new List<MethodInfo>();
-					groups[method.Name] = bucket;
-				}
-
-				bucket.Add(method);
-			}
-
-			Dictionary<string, IReadOnlyList<MethodInfo>> result = new(StringComparer.Ordinal);
-			foreach ((string name, List<MethodInfo> bucket) in groups)
-			{
-				bucket.Sort(static (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
-				result[name] = bucket;
-			}
-
-			return result;
-		});
 	}
 }

@@ -1,13 +1,13 @@
 #nullable enable
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Reflection.Emit;
 using Godot;
 using HarmonyLib;
+using ReForgeFramework.Mixins.Runtime.Reflection;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
@@ -178,9 +178,8 @@ public sealed class MixinPatchBindResult
 /// </remarks>
 internal sealed class HarmonyPatchBinder
 {
-	private static readonly ConcurrentDictionary<Type, Dictionary<string, FieldInfo>> _targetFieldMapByType = new();
-
-	private readonly HarmonyTargetResolver _targetResolver = new();
+	private readonly HarmonyTargetResolver _targetResolver;
+	private readonly IReflectionAccessor _reflectionAccessor;
 	private readonly MixinConflictPolicy _conflictPolicy;
 	private readonly MixinAppliedRegistry _appliedRegistry;
 
@@ -189,10 +188,14 @@ internal sealed class HarmonyPatchBinder
 	/// </summary>
 	/// <param name="conflictPolicy">冲突处理策略（可选，使用默认策略）。</param>
 	/// <param name="appliedRegistry">已应用补丁追踪注册表（可选，创建新实例）。</param>
+	/// <param name="reflectionAccessor">统一反射访问器（可选，使用默认缓存访问器）。</param>
 	public HarmonyPatchBinder(
 		MixinConflictPolicy? conflictPolicy = null,
-		MixinAppliedRegistry? appliedRegistry = null)
+		MixinAppliedRegistry? appliedRegistry = null,
+		IReflectionAccessor? reflectionAccessor = null)
 	{
+		_reflectionAccessor = reflectionAccessor ?? new ReflectionAccessor();
+		_targetResolver = new HarmonyTargetResolver(_reflectionAccessor);
 		_conflictPolicy = conflictPolicy ?? new MixinConflictPolicy();
 		_appliedRegistry = appliedRegistry ?? new MixinAppliedRegistry();
 	}
@@ -701,7 +704,7 @@ internal sealed class HarmonyPatchBinder
 		return removed;
 	}
 
-	private static void TryBindShadowFields(
+	private void TryBindShadowFields(
 		MixinDescriptor descriptor,
 		out int installed,
 		out int failed,
@@ -828,7 +831,7 @@ internal sealed class HarmonyPatchBinder
 		}
 	}
 
-	private static bool TryResolveShadowTargetField(
+	private bool TryResolveShadowTargetField(
 		MixinDescriptor descriptor,
 		ShadowFieldDescriptor shadow,
 		out FieldInfo? targetField,
@@ -849,44 +852,37 @@ internal sealed class HarmonyPatchBinder
 			return false;
 		}
 
-		Dictionary<string, FieldInfo> targetFieldMap = GetOrBuildTargetFieldMap(descriptor.TargetType);
+		ReflectionAccessError? firstResolveError = null;
+		ReflectionAccessContext context = new(
+			Owner: nameof(HarmonyPatchBinder),
+			Operation: "TryResolveShadowTargetField",
+			DescriptorKey: shadow.DescriptorKey,
+			Notes: descriptor.MixinId);
 
 		for (int i = 0; i < candidates.Count; i++)
 		{
 			string candidate = candidates[i];
-			if (targetFieldMap.TryGetValue(candidate, out FieldInfo? resolved))
+			ReflectionMemberKey key = new(
+				descriptor.TargetType,
+				candidate,
+				ReflectionMemberKind.Field);
+
+			if (_reflectionAccessor.TryResolveField(key, context, out FieldInfo? resolved, out ReflectionAccessError? resolveError)
+				&& resolved != null)
 			{
 				resolvedTargetName = candidate;
 				targetField = resolved;
 				return true;
 			}
+
+			firstResolveError ??= resolveError;
 		}
 
 		resolvedTargetName = candidates[0];
+		string detail = firstResolveError?.ToString() ?? "No candidate field could be resolved via reflection accessor cache.";
 		error =
-			$"Target field not found. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', candidates='{string.Join("|", candidates)}'.";
+			$"Target field not found. mixin='{descriptor.MixinType.FullName}', targetType='{descriptor.TargetType.FullName}', member='{shadow.MixinField.Name}', candidates='{string.Join("|", candidates)}'. detail={detail}";
 		return false;
-	}
-
-	private static Dictionary<string, FieldInfo> GetOrBuildTargetFieldMap(Type targetType)
-	{
-		return _targetFieldMapByType.GetOrAdd(targetType, static type =>
-		{
-			const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-			FieldInfo[] fields = type.GetFields(flags);
-			Dictionary<string, FieldInfo> map = new(StringComparer.Ordinal);
-
-			for (int i = 0; i < fields.Length; i++)
-			{
-				FieldInfo field = fields[i];
-				if (!map.ContainsKey(field.Name))
-				{
-					map[field.Name] = field;
-				}
-			}
-
-			return map;
-		});
 	}
 
 	private static List<string> BuildShadowCandidates(ShadowFieldDescriptor shadow)

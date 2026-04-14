@@ -42,6 +42,7 @@ public static partial class ReForge
 		string tabTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.TAB", "ReForge");
 		string optionTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TITLE", "Enable Debug Console");
 		string optionIndex8BitTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.OPTION_INDEX_8BIT_TITLE", "Enable 8-bit Event Option Index (MP Compatibility Risk)");
+		string forceShowExtendedAscensionTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FORCE_SHOW_EXT_ASC_TITLE", "显示所有拓展阶");
 		string feedbackTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TITLE", "反馈");
 		string feedbackButtonText = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_BUTTON", "反馈");
 		string noSteamTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.NO_STEAM_TITLE", "Launch No-Steam Instance");
@@ -62,6 +63,13 @@ public static partial class ReForge
 				tipLocTable: "gameplay_ui",
 				tipTitleEntryKey: "REFORGE.SETTINGS.OPTION_INDEX_8BIT_TIP_TITLE",
 				tipDescriptionEntryKey: "REFORGE.SETTINGS.OPTION_INDEX_8BIT_TIP_DESC")
+			.AddToggle(
+				title: forceShowExtendedAscensionTitle,
+				initialValue: RuntimeSettings.ForceShowAllExtendedAscensionLevels,
+				onToggled: OnForceShowAllExtendedAscensionLevelsToggled,
+				tipLocTable: "gameplay_ui",
+				tipTitleEntryKey: "REFORGE.SETTINGS.FORCE_SHOW_EXT_ASC_TIP_TITLE",
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.FORCE_SHOW_EXT_ASC_TIP_DESC")
 			.AddFeedbackButton(
 				title: feedbackTitle,
 				buttonText: feedbackButtonText,
@@ -121,9 +129,21 @@ public static partial class ReForge
 		GD.Print("[ReForge.Settings] OptionIndex 8-bit patch disabled. Restart required to apply.");
 	}
 
+	private static void OnForceShowAllExtendedAscensionLevelsToggled(bool enabled)
+	{
+		RuntimeSettings.ForceShowAllExtendedAscensionLevels = enabled;
+		ReForgeSettingsStore.Save(RuntimeSettings);
+		GD.Print($"[ReForge.Settings] Force show all extended ascension levels set to: {enabled}.");
+	}
+
 	internal static bool IsOptionIndex8BitPatchEnabled()
 	{
 		return RuntimeSettings.EnableOptionIndex8BitPatch;
+	}
+
+	internal static bool IsForceShowAllExtendedAscensionLevelsEnabled()
+	{
+		return RuntimeSettings.ForceShowAllExtendedAscensionLevels;
 	}
 
 	private static void OpenFeedbackRepository()
@@ -201,6 +221,8 @@ public static partial class ReForge
 		public bool EnableDebugConsole { get; set; }
 
 		public bool EnableOptionIndex8BitPatch { get; set; }
+
+		public bool ForceShowAllExtendedAscensionLevels { get; set; }
 	}
 
 	private static class ReForgeSettingsStore
