@@ -1476,6 +1476,15 @@ public static class ReForgeModManager
 		builder.AppendLine("\t\t}");
 		builder.AppendLine("\t}");
 		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> BattleEventRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 战斗及时事件注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
 		builder.AppendLine("\tprotected override IEnumerable<Action> AncientEventRegistrations");
 		builder.AppendLine("\t{");
 		builder.AppendLine("\t\tget");

@@ -145,6 +145,18 @@ public abstract class ReForgeModBase
 	}
 
 	/// <summary>
+	/// 战斗及时事件注册。
+	/// 与普通 EventRegistrations 分离，避免语义混淆。
+	/// </summary>
+	protected virtual IEnumerable<Action> BattleEventRegistrations
+	{
+		get
+		{
+			yield break;
+		}
+	}
+
+	/// <summary>
 	/// 远古事件注册。
 	/// </summary>
 	protected virtual IEnumerable<Action> AncientEventRegistrations
@@ -533,6 +545,7 @@ public abstract class ReForgeModBase
 		ExecutePhase(BossRegistrations, "boss");
 		ExecutePhase(CardPoolRegistrations, "card-pool");
 		ExecutePhase(EventRegistrations, "event");
+		ExecutePhase(BattleEventRegistrations, "battle-event");
 		ExecutePhase(AncientEventRegistrations, "ancient-event");
 		ExecutePhase(ModelInjectionRegistrations, "model-injection");
 		ExecutePhase(ModelPoolRegistrations, "model-pool");

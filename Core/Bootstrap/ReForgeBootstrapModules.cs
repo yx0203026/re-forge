@@ -16,6 +16,7 @@ internal static class ReForgeBootstrapModules
 		[
 			new BootstrapModule("EventBus", () => ReForge.EventBus.Initialize(), AllowDegrade: false),
 			new BootstrapModule("Network", () => ReForge.Network.Initialize(), AllowDegrade: false),
+			new BootstrapModule("BattleEvents", () => ReForge.BattleEvents.Initialize(), AllowDegrade: false),
 			new BootstrapModule("ModManager", () => ReForgeModManager.Initialize(), AllowDegrade: false),
 			new BootstrapModule("EventWheel", initializeEventWheel, AllowDegrade: true)
 		];

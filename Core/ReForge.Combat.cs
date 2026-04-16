@@ -17,7 +17,7 @@ public static partial class ReForge
 	/// <summary>
 	/// ReForge 战斗工具入口：封装常见的净化/清理流程，减少模组重复代码。
 	/// </summary>
-	public static class Combat
+	public static partial class Combat
 	{
 		private static readonly PileType[] DefaultCombatPileTypes =
 		[
