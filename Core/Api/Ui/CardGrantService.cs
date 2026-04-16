@@ -12,6 +12,10 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 
@@ -188,6 +192,16 @@ public static class CardGrantService
 
 		if (addResult.success && inDeck)
 		{
+			if (playAnimation)
+			{
+				animationApplied = TryPlayDeckAddFlyAnimation(resolvedCard);
+			}
+
+			if (!animationApplied)
+			{
+				resolvedCard.Pile?.InvokeCardAddFinished();
+			}
+
 			TrySyncGrantedCardToRewardNetwork(runState, player, resolvedCard);
 
 			if (markSeenAfterGrant)
@@ -221,6 +235,16 @@ public static class CardGrantService
 			runState.CurrentMapPointHistoryEntry?.GetEntry(player.NetId).CardsGained.Add(resolvedCard.ToSerializable());
 		}
 
+		if (playAnimation)
+		{
+			animationApplied = TryPlayDeckAddFlyAnimation(resolvedCard);
+		}
+
+		if (!animationApplied)
+		{
+			resolvedCard.Pile?.InvokeCardAddFinished();
+		}
+
 		if (markSeenAfterGrant)
 		{
 			TryMarkCardAsSeen(resolvedCard);
@@ -233,8 +257,52 @@ public static class CardGrantService
 			Card = resolvedCard,
 			GrantSucceeded = player.Deck.Cards.Contains(resolvedCard),
 			UsedFallbackInsertion = true,
-			AnimationApplied = false
+			AnimationApplied = animationApplied
 		};
+	}
+
+	/// <summary>
+	/// 复用官方奖励页“拿牌飞向牌库”的表现：
+	/// ReparentCard + NCardFlyVfx（isAddingToPile=true）。
+	/// </summary>
+	private static bool TryPlayDeckAddFlyAnimation(CardModel card)
+	{
+		try
+		{
+			NRun? runNode = NRun.Instance;
+			if (runNode?.GlobalUi == null)
+			{
+				return false;
+			}
+
+			NCard? cardNode = NCard.Create(card);
+			if (cardNode == null)
+			{
+				return false;
+			}
+
+			NGlobalUi globalUi = runNode.GlobalUi;
+			globalUi.CardPreviewContainer.AddChild(cardNode);
+			cardNode.UpdateVisuals(PileType.None, CardPreviewMode.Normal);
+			cardNode.GlobalPosition = globalUi.GetViewportRect().Size * 0.5f;
+
+			globalUi.ReparentCard(cardNode);
+			Vector2 targetPosition = PileType.Deck.GetTargetPosition(cardNode);
+			NCardFlyVfx? flyVfx = NCardFlyVfx.Create(cardNode, targetPosition, isAddingToPile: true, card.Owner.Character.TrailPath);
+			if (flyVfx == null)
+			{
+				cardNode.QueueFree();
+				return false;
+			}
+
+			globalUi.TopBar.TrailContainer.AddChild(flyVfx);
+			return true;
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.UI.CardGrant] Deck add fly animation failed for '{card.Id}': {ex.Message}");
+			return false;
+		}
 	}
 
 	private static void TrySyncGrantedCardToRewardNetwork(RunState runState, Player player, CardModel card)

@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Runs;
@@ -12,6 +13,9 @@ using ReForgeFramework.EventBus;
 /// </summary>
 public abstract class ReForgeAscensionModel
 {
+	private readonly ConditionalWeakTable<IRunState, GameStartHandledMarker> _gameStartHandledRuns = new();
+	private readonly object _gameStartHandledRunsLock = new();
+
 	/// <summary>
 	/// 扩展难度等级，必须大于 10。
 	/// </summary>
@@ -59,6 +63,12 @@ public abstract class ReForgeAscensionModel
 	public virtual bool EnableRunStartedHook => true;
 
 	/// <summary>
+	/// 是否启用“游戏开局一次性”钩子。
+	/// 默认为 true，并在基类中自动去重同一局的重复触发。
+	/// </summary>
+	public virtual bool EnableGameStartedHook => true;
+
+	/// <summary>
 	/// 运行是否满足当前 Ascension 模型生效条件。
 	/// </summary>
 	protected virtual bool ShouldHandleRun(IRunState runState, int currentAscension)
@@ -71,6 +81,23 @@ public abstract class ReForgeAscensionModel
 	/// </summary>
 	protected virtual void OnRunStarted(RunState runState, int currentAscension)
 	{
+	}
+
+	/// <summary>
+	/// 游戏开局钩子（每局仅触发一次）。
+	/// 默认仅在真正新开局阶段触发，读档恢复不会触发。
+	/// </summary>
+	protected virtual void OnGameStarted(RunState runState, int currentAscension)
+	{
+	}
+
+	/// <summary>
+	/// 是否满足“游戏开局一次性”钩子的触发条件。
+	/// 默认条件：总层数为 0 且尚未进入首个地图点。
+	/// </summary>
+	protected virtual bool ShouldHandleGameStarted(RunState runState, int currentAscension)
+	{
+		return runState.TotalFloor == 0 && runState.CurrentMapPointHistoryEntry == null;
 	}
 
 	/// <summary>
@@ -292,7 +319,36 @@ public abstract class ReForgeAscensionModel
 
 	private void HandleRunStarted(RunState runState)
 	{
-		InvokeIfEligible(runState, asc => OnRunStarted(runState, asc));
+		InvokeIfEligible(runState, asc =>
+		{
+			OnRunStarted(runState, asc);
+
+			if (!EnableGameStartedHook || !ShouldHandleGameStarted(runState, asc))
+			{
+				return;
+			}
+
+			if (!TryMarkGameStartedHandled(runState))
+			{
+				return;
+			}
+
+			OnGameStarted(runState, asc);
+		});
+	}
+
+	private bool TryMarkGameStartedHandled(IRunState runState)
+	{
+		lock (_gameStartHandledRunsLock)
+		{
+			if (_gameStartHandledRuns.TryGetValue(runState, out _))
+			{
+				return false;
+			}
+
+			_gameStartHandledRuns.Add(runState, new GameStartHandledMarker());
+			return true;
+		}
 	}
 
 	private void InvokeFromCombat(CombatState? combatState, Action<int> callback)
@@ -339,5 +395,9 @@ public abstract class ReForgeAscensionModel
 			".",
 			Level.ToString()
 		).Replace('+', '.');
+	}
+
+	private sealed class GameStartHandledMarker
+	{
 	}
 }
