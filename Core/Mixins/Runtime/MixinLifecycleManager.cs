@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Reflection;
 using Godot;
+using ReForgeFramework.Mixins.Runtime.Reflection;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
@@ -14,11 +15,16 @@ internal sealed class MixinLifecycleManager
 	private readonly Dictionary<string, ModContext> _contexts = new(StringComparer.Ordinal);
 	private readonly MixinScanner _scanner;
 	private readonly HarmonyPatchBinder _binder;
+	private readonly ReflectionWarmupCoordinator _reflectionWarmupCoordinator;
 
-	public MixinLifecycleManager(MixinScanner? scanner = null, HarmonyPatchBinder? binder = null)
+	public MixinLifecycleManager(
+		MixinScanner? scanner = null,
+		HarmonyPatchBinder? binder = null,
+		ReflectionWarmupCoordinator? reflectionWarmupCoordinator = null)
 	{
+		_reflectionWarmupCoordinator = reflectionWarmupCoordinator ?? new ReflectionWarmupCoordinator();
 		_scanner = scanner ?? new MixinScanner();
-		_binder = binder ?? new HarmonyPatchBinder();
+		_binder = binder ?? new HarmonyPatchBinder(reflectionAccessor: _reflectionWarmupCoordinator.Accessor);
 	}
 
 	public MixinLifecycleInstallResult InitializeAndInstall(MixinRegistrationOptions options)
@@ -78,6 +84,8 @@ internal sealed class MixinLifecycleManager
 		try
 		{
 			MixinScanResult scanResult = _scanner.Scan(options.Assembly);
+			_reflectionWarmupCoordinator.RegisterPlansFromMixins(scanResult.Descriptors);
+			ReflectionWarmupBatchResult warmupResult = _reflectionWarmupCoordinator.WarmupAll();
 			int scannerWarnings = CountSeverity(scanResult.Diagnostics, MixinScanDiagnosticSeverity.Warning);
 			int scannerErrors = scanResult.ErrorCount;
 			int installed = 0;
@@ -97,7 +105,11 @@ internal sealed class MixinLifecycleManager
 					Skipped: 0,
 					ScannerErrors: scannerErrors,
 					ScannerWarnings: scannerWarnings,
-					UnpatchFailures: 0
+					UnpatchFailures: 0,
+					WarmupResolved: warmupResult.ResolvedCount,
+					WarmupRequiredFailures: warmupResult.RequiredFailureCount,
+					WarmupOptionalFailures: warmupResult.OptionalFailureCount,
+					WarmupDurationMs: warmupResult.DurationMs
 				);
 
 				string strictScanMessage =
@@ -112,6 +124,37 @@ internal sealed class MixinLifecycleManager
 					AbortedByStrictMode: true,
 					counters,
 					strictScanMessage,
+					DateTimeOffset.UtcNow
+				);
+			}
+
+			if (options.StrictMode && warmupResult.HasRequiredFailures)
+			{
+				MixinLifecycleCounters counters = new(
+					Installed: 0,
+					Failed: 0,
+					Skipped: 0,
+					ScannerErrors: scannerErrors,
+					ScannerWarnings: scannerWarnings,
+					UnpatchFailures: 0,
+					WarmupResolved: warmupResult.ResolvedCount,
+					WarmupRequiredFailures: warmupResult.RequiredFailureCount,
+					WarmupOptionalFailures: warmupResult.OptionalFailureCount,
+					WarmupDurationMs: warmupResult.DurationMs
+				);
+
+				string strictWarmupMessage =
+					$"Install aborted because strict mode detected required reflection warmup failures. modId='{modId}', warmupRequiredFailures={warmupResult.RequiredFailureCount}, warmupOptionalFailures={warmupResult.OptionalFailureCount}.";
+				GD.PrintErr($"[ReForge.Mixins] {strictWarmupMessage}");
+				UpdateInstallFinalState(modId, MixinLifecycleState.Failed, counters, strictWarmupMessage, appliedHandles, DateTimeOffset.UtcNow);
+
+				return new MixinLifecycleInstallResult(
+					modId,
+					MixinLifecycleState.Failed,
+					NoOp: false,
+					AbortedByStrictMode: true,
+					counters,
+					strictWarmupMessage,
 					DateTimeOffset.UtcNow
 				);
 			}
@@ -172,11 +215,15 @@ internal sealed class MixinLifecycleManager
 				Skipped: skipped,
 				ScannerErrors: scannerErrors,
 				ScannerWarnings: scannerWarnings,
-				UnpatchFailures: rollbackFailures
+				UnpatchFailures: rollbackFailures,
+				WarmupResolved: warmupResult.ResolvedCount,
+				WarmupRequiredFailures: warmupResult.RequiredFailureCount,
+				WarmupOptionalFailures: warmupResult.OptionalFailureCount,
+				WarmupDurationMs: warmupResult.DurationMs
 			);
 
 			string finalMessage =
-				$"Install completed. modId='{modId}', installed={installed}, failed={failed}, skipped={skipped}, shadowInstalled={shadowInstalled}, shadowFailed={shadowFailed}, shadowSkipped={shadowSkipped}, scannerErrors={scannerErrors}, strict={options.StrictMode}, rollbackRemoved={rollbackRemoved}, rollbackFailures={rollbackFailures}.";
+				$"Install completed. modId='{modId}', installed={installed}, failed={failed}, skipped={skipped}, shadowInstalled={shadowInstalled}, shadowFailed={shadowFailed}, shadowSkipped={shadowSkipped}, scannerErrors={scannerErrors}, strict={options.StrictMode}, rollbackRemoved={rollbackRemoved}, rollbackFailures={rollbackFailures}, warmupResolved={warmupResult.ResolvedCount}, warmupRequiredFailures={warmupResult.RequiredFailureCount}, warmupOptionalFailures={warmupResult.OptionalFailureCount}, warmupDurationMs={warmupResult.DurationMs}.";
 			if (finalState == MixinLifecycleState.Failed)
 			{
 				GD.PrintErr($"[ReForge.Mixins] {finalMessage}");
@@ -199,7 +246,7 @@ internal sealed class MixinLifecycleManager
 		}
 		catch (Exception exception)
 		{
-			MixinLifecycleCounters counters = new(0, 1, 0, 0, 0, 0);
+			MixinLifecycleCounters counters = new(0, 1, 0, 0, 0, 0, 0, 0, 0, 0);
 			string errorMessage = $"Install crashed but was isolated. modId='{modId}'. {exception}";
 			GD.PrintErr($"[ReForge.Mixins] {errorMessage}");
 			UpdateInstallFinalState(modId, MixinLifecycleState.Failed, counters, errorMessage, appliedHandles: null, DateTimeOffset.UtcNow);
@@ -379,6 +426,78 @@ internal sealed class MixinLifecycleManager
 	public IReadOnlyList<MixinAppliedEntry> GetAppliedEntries()
 	{
 		return _binder.GetAppliedEntries();
+	}
+
+	public ReflectionRuntimeSnapshot GetReflectionRuntimeSnapshot()
+	{
+		return _reflectionWarmupCoordinator.GetRuntimeSnapshot();
+	}
+
+	public void RegisterExternalReflectionWarmupPlan(
+		string planId,
+		string owner,
+		IReadOnlyList<ReflectionMemberKey> requiredMembers,
+		IReadOnlyList<ReflectionMemberKey> optionalMembers)
+	{
+		ArgumentNullException.ThrowIfNull(planId);
+		ArgumentNullException.ThrowIfNull(owner);
+		ArgumentNullException.ThrowIfNull(requiredMembers);
+		ArgumentNullException.ThrowIfNull(optionalMembers);
+
+		_reflectionWarmupCoordinator.RegisterPlan(new ReflectionWarmupPlan(
+			planId,
+			owner,
+			requiredMembers,
+			optionalMembers
+		));
+	}
+
+	public bool TryResolveMethod(
+		in ReflectionMemberKey key,
+		in ReflectionAccessContext context,
+		out MethodInfo? method,
+		out ReflectionAccessError? error)
+	{
+		return _reflectionWarmupCoordinator.Accessor.TryResolveMethod(key, context, out method, out error);
+	}
+
+	public bool TryResolveField(
+		in ReflectionMemberKey key,
+		in ReflectionAccessContext context,
+		out FieldInfo? field,
+		out ReflectionAccessError? error)
+	{
+		return _reflectionWarmupCoordinator.Accessor.TryResolveField(key, context, out field, out error);
+	}
+
+	public bool TryResolveProperty(
+		in ReflectionMemberKey key,
+		in ReflectionAccessContext context,
+		out PropertyInfo? property,
+		out ReflectionAccessError? error)
+	{
+		return _reflectionWarmupCoordinator.Accessor.TryResolveProperty(key, context, out property, out error);
+	}
+
+	public bool TryInvoke(
+		MethodInfo method,
+		object? instance,
+		object?[]? args,
+		in ReflectionAccessContext context,
+		out object? returnValue,
+		out ReflectionAccessError? error)
+	{
+		return _reflectionWarmupCoordinator.Accessor.TryInvoke(method, instance, args, context, out returnValue, out error);
+	}
+
+	public bool TrySetFieldValue(
+		FieldInfo field,
+		object? instance,
+		object? value,
+		in ReflectionAccessContext context,
+		out ReflectionAccessError? error)
+	{
+		return _reflectionWarmupCoordinator.Accessor.TrySetFieldValue(field, instance, value, context, out error);
 	}
 
 	private int RollbackAppliedHandles(

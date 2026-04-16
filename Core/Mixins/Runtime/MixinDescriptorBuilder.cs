@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Reflection;
+using ReForgeFramework.Mixins.Runtime.Reflection;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
@@ -84,7 +85,13 @@ public sealed record InjectionDescriptor(
 
 	/// <summary>修改常量时的常量表达式（ModifyConstant 使用）。</summary>
 	string ConstantExpression
-);
+)
+{
+	/// <summary>
+	/// 目标方法签名键（用于运行期缓存解析与重载定位）。
+	/// </summary>
+	public string TargetMethodSignatureKey { get; init; } = string.Empty;
+}
 
 /// <summary>
 /// 验证通过的 Shadow 字段映射信息。
@@ -319,7 +326,10 @@ internal sealed class MixinDescriptorBuilder
 			attribute.Optional,
 			validated.ArgumentIndex,
 			validated.ConstantExpression
-		);
+		)
+		{
+			TargetMethodSignatureKey = ReflectionSignatureBuilder.BuildMethodSignature(validated.TargetMethod),
+		};
 	}
 
 	private static ShadowFieldDescriptor BuildShadowField(

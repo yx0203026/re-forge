@@ -27,7 +27,7 @@ public static partial class ReForge
 	/// • Shadow 字段映射：通过 <see cref="global::ReForge.ShadowAttribute"/> 访问目标类型私有字段
 	/// • 诊断支持：<see cref="GetStatus"/>、<see cref="GetDiagnosticsSnapshot"/>
 	/// </remarks>
-	public static class Mixins
+	public static partial class Mixins
 	{
 		private static readonly object SyncRoot = new();
 		private static readonly Dictionary<string, MixinRegistrationResult> Registrations = new(StringComparer.Ordinal);
@@ -113,6 +113,79 @@ public static partial class ReForge
 			);
 
 			return Register(options);
+		}
+
+		/// <summary>
+		/// 注册此模组的 Mixin（隐式 Harmony 重载）。
+		/// </summary>
+		/// <remarks>
+		/// 此重载会在内部创建 Harmony 实例，开发者无需显式引用 Harmony。
+		/// </remarks>
+		public static MixinRegistrationResult Register(Assembly assembly, string modId, bool strictMode = true)
+		{
+			Harmony harmony = new(modId);
+			return Register(assembly, modId, harmony, strictMode);
+		}
+
+		/// <summary>
+		/// 注册此模组的 Mixin（自动推断 modId + 隐式 Harmony）。
+		/// </summary>
+		public static MixinRegistrationResult Register(Assembly assembly, bool strictMode = true)
+		{
+			ArgumentNullException.ThrowIfNull(assembly);
+			string inferredModId = InferModIdFromAssembly(assembly);
+			return Register(assembly, inferredModId, strictMode);
+		}
+
+		/// <summary>
+		/// 非抛出注册：失败时返回 false 并输出错误日志。
+		/// </summary>
+		public static bool TryRegister(Assembly assembly, string modId, bool strictMode, out MixinRegistrationResult result)
+		{
+			try
+			{
+				result = Register(assembly, modId, strictMode);
+				return result.State == MixinRegistrationState.Registered && result.Summary.Failed == 0;
+			}
+			catch (Exception ex)
+			{
+				result = new MixinRegistrationResult(
+					modId,
+					MixinRegistrationSource.MainClassExplicit,
+					MixinRegistrationState.NotRegistered,
+					strictMode,
+					new MixinRegistrationSummary(0, 1, 0),
+					ex.Message,
+					DateTimeOffset.UtcNow
+				);
+				GD.PrintErr($"[ReForge.Mixins] TryRegister failed. modId='{modId}', strictMode={strictMode}. {ex}");
+				return false;
+			}
+		}
+
+		/// <summary>
+		/// 非抛出注册：自动推断 modId。
+		/// </summary>
+		public static bool TryRegister(Assembly assembly, bool strictMode, out MixinRegistrationResult result)
+		{
+			ArgumentNullException.ThrowIfNull(assembly);
+			return TryRegister(assembly, InferModIdFromAssembly(assembly), strictMode, out result);
+		}
+
+		/// <summary>
+		/// 非抛出注册（隐式结果）：内部自动完成日志记录与异常隔离。
+		/// </summary>
+		public static bool TryRegister(Assembly assembly, string modId, bool strictMode = true)
+		{
+			return TryRegister(assembly, modId, strictMode, out _);
+		}
+
+		/// <summary>
+		/// 非抛出注册（自动推断 modId + 隐式结果）。
+		/// </summary>
+		public static bool TryRegister(Assembly assembly, bool strictMode = true)
+		{
+			return TryRegister(assembly, strictMode, out _);
 		}
 
 		/// <summary>
@@ -241,7 +314,12 @@ public static partial class ReForge
 			MixinStatusSnapshot registrationStatus = GetStatus();
 			MixinLifecycleSnapshot lifecycleSnapshot = LifecycleManager.Snapshot();
 			IReadOnlyList<MixinAppliedEntry> appliedEntries = LifecycleManager.GetAppliedEntries();
-			return Diagnostics.BuildSnapshot(registrationStatus, lifecycleSnapshot, appliedEntries);
+			return Diagnostics.BuildSnapshot(
+				registrationStatus,
+				lifecycleSnapshot,
+				appliedEntries,
+				LifecycleManager.GetReflectionRuntimeSnapshot()
+			);
 		}
 
 		/// <summary>
@@ -264,6 +342,17 @@ public static partial class ReForge
 			{
 				throw new ArgumentException("Only main-class explicit registration is allowed.", nameof(source));
 			}
+		}
+
+		private static string InferModIdFromAssembly(Assembly assembly)
+		{
+			string? assemblyName = assembly.GetName().Name;
+			if (!string.IsNullOrWhiteSpace(assemblyName))
+			{
+				return assemblyName;
+			}
+
+			return "reforge.mod.unknown";
 		}
 
 		private static MixinRegistrationResult BuildRegistrationResultFromInstall(

@@ -61,7 +61,19 @@ public readonly record struct MixinLifecycleCounters(
 	int ScannerWarnings,
 
 	/// <summary>卸载阶段失败的补丁数量。</summary>
-	int UnpatchFailures
+	int UnpatchFailures,
+
+	/// <summary>预热阶段成功解析的反射成员数量。</summary>
+	int WarmupResolved = 0,
+
+	/// <summary>预热阶段必需成员失败数量。</summary>
+	int WarmupRequiredFailures = 0,
+
+	/// <summary>预热阶段可选成员失败数量。</summary>
+	int WarmupOptionalFailures = 0,
+
+	/// <summary>预热阶段总耗时（毫秒）。</summary>
+	long WarmupDurationMs = 0
 );
 
 /// <summary>

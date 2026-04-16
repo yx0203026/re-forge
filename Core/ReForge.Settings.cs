@@ -23,8 +23,17 @@ public static partial class ReForge
 			return;
 		}
 
-		_settingsInitialized = true;
-		RegisterSettingsUi();
+		try
+		{
+			RegisterSettingsUi();
+			_settingsInitialized = true;
+		}
+		catch (Exception ex)
+		{
+			_settingsInitialized = false;
+			GD.PrintErr($"[ReForge.Settings] InitializeRuntimeSettings failed; initialization flag reset for retry. {ex}");
+			throw;
+		}
 	}
 
 	private static void ApplyPostInitializationSettings()
@@ -41,8 +50,12 @@ public static partial class ReForge
 
 		string tabTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.TAB", "ReForge");
 		string optionTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.DEBUG_TITLE", "Enable Debug Console");
+		string optionIndex8BitTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.OPTION_INDEX_8BIT_TITLE", "Enable 8-bit Event Option Index (MP Compatibility Risk)");
+		string forceShowExtendedAscensionTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FORCE_SHOW_EXT_ASC_TITLE", "显示所有拓展阶");
 		string feedbackTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_TITLE", "反馈");
 		string feedbackButtonText = Settings.T("gameplay_ui", "REFORGE.SETTINGS.FEEDBACK_BUTTON", "反馈");
+		string noSteamTitle = Settings.T("gameplay_ui", "REFORGE.SETTINGS.NO_STEAM_TITLE", "Launch No-Steam Instance");
+		string noSteamButtonText = Settings.T("gameplay_ui", "REFORGE.SETTINGS.NO_STEAM_BUTTON", "Launch");
 
 		Settings.Page(SettingsScreenKey, tabTitle, selected: false)
 			.AddToggle(
@@ -52,13 +65,34 @@ public static partial class ReForge
 				tipLocTable: "gameplay_ui",
 				tipTitleEntryKey: "REFORGE.SETTINGS.DEBUG_TIP_TITLE",
 				tipDescriptionEntryKey: "REFORGE.SETTINGS.DEBUG_TIP_DESC")
+			.AddToggle(
+				title: optionIndex8BitTitle,
+				initialValue: RuntimeSettings.EnableOptionIndex8BitPatch,
+				onToggled: OnOptionIndex8BitPatchToggled,
+				tipLocTable: "gameplay_ui",
+				tipTitleEntryKey: "REFORGE.SETTINGS.OPTION_INDEX_8BIT_TIP_TITLE",
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.OPTION_INDEX_8BIT_TIP_DESC")
+			.AddToggle(
+				title: forceShowExtendedAscensionTitle,
+				initialValue: RuntimeSettings.ForceShowAllExtendedAscensionLevels,
+				onToggled: OnForceShowAllExtendedAscensionLevelsToggled,
+				tipLocTable: "gameplay_ui",
+				tipTitleEntryKey: "REFORGE.SETTINGS.FORCE_SHOW_EXT_ASC_TIP_TITLE",
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.FORCE_SHOW_EXT_ASC_TIP_DESC")
 			.AddFeedbackButton(
 				title: feedbackTitle,
 				buttonText: feedbackButtonText,
 				onPressed: OpenFeedbackRepository,
 				tipLocTable: "gameplay_ui",
 				tipTitleEntryKey: "REFORGE.SETTINGS.FEEDBACK_TIP_TITLE",
-				tipDescriptionEntryKey: "REFORGE.SETTINGS.FEEDBACK_TIP_DESC");
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.FEEDBACK_TIP_DESC")
+			.AddFeedbackButton(
+				title: noSteamTitle,
+				buttonText: noSteamButtonText,
+				onPressed: LaunchNoSteamInstance,
+				tipLocTable: "gameplay_ui",
+				tipTitleEntryKey: "REFORGE.SETTINGS.NO_STEAM_TIP_TITLE",
+				tipDescriptionEntryKey: "REFORGE.SETTINGS.NO_STEAM_TIP_DESC");
 
 		RegisterModManagerTab();
 	}
@@ -90,6 +124,37 @@ public static partial class ReForge
 		}
 	}
 
+	private static void OnOptionIndex8BitPatchToggled(bool enabled)
+	{
+		RuntimeSettings.EnableOptionIndex8BitPatch = enabled;
+		ReForgeSettingsStore.Save(RuntimeSettings);
+
+		if (enabled)
+		{
+			GD.Print("[ReForge.Settings] OptionIndex 8-bit patch enabled. Restart required to apply and all peers should use the same setting.");
+			return;
+		}
+
+		GD.Print("[ReForge.Settings] OptionIndex 8-bit patch disabled. Restart required to apply.");
+	}
+
+	private static void OnForceShowAllExtendedAscensionLevelsToggled(bool enabled)
+	{
+		RuntimeSettings.ForceShowAllExtendedAscensionLevels = enabled;
+		ReForgeSettingsStore.Save(RuntimeSettings);
+		GD.Print($"[ReForge.Settings] Force show all extended ascension levels set to: {enabled}.");
+	}
+
+	internal static bool IsOptionIndex8BitPatchEnabled()
+	{
+		return RuntimeSettings.EnableOptionIndex8BitPatch;
+	}
+
+	internal static bool IsForceShowAllExtendedAscensionLevelsEnabled()
+	{
+		return RuntimeSettings.ForceShowAllExtendedAscensionLevels;
+	}
+
 	private static void OpenFeedbackRepository()
 	{
 		GD.Print($"[ReForge.Settings] Opening feedback repository URL: {FeedbackRepositoryUrl}");
@@ -119,9 +184,54 @@ public static partial class ReForge
 		GD.PrintErr($"[ReForge.Settings] Failed to open feedback repository URL: {FeedbackRepositoryUrl}, Error={openResult}");
 	}
 
+	private static void LaunchNoSteamInstance()
+	{
+		string executablePath = OS.GetExecutablePath();
+		if (string.IsNullOrWhiteSpace(executablePath) || !System.IO.File.Exists(executablePath))
+		{
+			GD.PrintErr($"[ReForge.Settings] Cannot launch no-Steam instance: invalid executable path '{executablePath}'.");
+			return;
+		}
+
+		string? workingDirectory = System.IO.Path.GetDirectoryName(executablePath);
+		if (string.IsNullOrWhiteSpace(workingDirectory) || !System.IO.Directory.Exists(workingDirectory))
+		{
+			GD.PrintErr($"[ReForge.Settings] Cannot launch no-Steam instance: invalid working directory '{workingDirectory}'.");
+			return;
+		}
+
+		try
+		{
+			ProcessStartInfo startInfo = new()
+			{
+				FileName = executablePath,
+				WorkingDirectory = workingDirectory,
+				UseShellExecute = false
+			};
+			startInfo.ArgumentList.Add("--force-steam=off");
+
+			using Process? launchedProcess = Process.Start(startInfo);
+			if (launchedProcess == null)
+			{
+				GD.PrintErr("[ReForge.Settings] Failed to start no-Steam instance process.");
+				return;
+			}
+
+			GD.Print($"[ReForge.Settings] Launched no-Steam instance. pid={launchedProcess.Id}, exe='{executablePath}'.");
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.Settings] Failed to launch no-Steam instance. {ex}");
+		}
+	}
+
 	private sealed class ReForgeSettingsData
 	{
 		public bool EnableDebugConsole { get; set; }
+
+		public bool EnableOptionIndex8BitPatch { get; set; }
+
+		public bool ForceShowAllExtendedAscensionLevels { get; set; }
 	}
 
 	private static class ReForgeSettingsStore

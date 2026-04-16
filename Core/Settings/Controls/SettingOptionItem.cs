@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using ReForgeFramework.Settings.Abstractions;
+using ReForgeFramework.Settings.Internal;
 using ReForgeFramework.Settings.Localization;
 
 namespace ReForgeFramework.Settings.Controls;
@@ -400,13 +401,13 @@ public sealed class SettingOptionItem : UiElement
 
 			try
 			{
-				PropertyInfo? isEnabledProperty = button.GetType().GetProperty("IsEnabled", BindingFlags.Instance | BindingFlags.Public);
+				PropertyInfo? isEnabledProperty = SettingsReflectionCache.GetIsEnabledProperty(button.GetType());
 				if (isEnabledProperty?.CanWrite == true && isEnabledProperty.PropertyType == typeof(bool))
 				{
 					isEnabledProperty.SetValue(button, true);
 				}
 
-				MethodInfo? enableMethod = button.GetType().GetMethod("Enable", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+				MethodInfo? enableMethod = SettingsReflectionCache.GetEnableMethod(button.GetType());
 				enableMethod?.Invoke(button, null);
 			}
 			catch
@@ -461,14 +462,14 @@ public sealed class SettingOptionItem : UiElement
 
 			if (button.GetNodeOrNull<Node>("Label") is { } anyLabel)
 			{
-				MethodInfo? setAutoSize = anyLabel.GetType().GetMethod("SetTextAutoSize", BindingFlags.Instance | BindingFlags.Public, null, new[] { typeof(string) }, null);
+				MethodInfo? setAutoSize = SettingsReflectionCache.GetSetTextAutoSizeMethod(anyLabel.GetType());
 				if (setAutoSize != null)
 				{
 					setAutoSize.Invoke(anyLabel, new object?[] { text });
 					return;
 				}
 
-				PropertyInfo? textProp = anyLabel.GetType().GetProperty("Text", BindingFlags.Instance | BindingFlags.Public);
+				PropertyInfo? textProp = SettingsReflectionCache.GetTextProperty(anyLabel.GetType());
 				if (textProp?.CanWrite == true)
 				{
 					textProp.SetValue(anyLabel, text);

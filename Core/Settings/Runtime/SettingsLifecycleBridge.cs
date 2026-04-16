@@ -71,10 +71,16 @@ internal static class SettingsLifecycleBridge
 
 		if (Engine.GetMainLoop() is not SceneTree tree)
 		{
+			lock (Sync)
+			{
+				_reinjectQueued = false;
+			}
+
+			GD.PrintErr("[ReForge.Settings] QueueReinject skipped because SceneTree is not ready.");
 			return;
 		}
 
-		tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(() =>
+		Error connectResult = tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(() =>
 		{
 			List<ReForgeSettingsApi> aliveApis = new();
 			lock (Sync)
@@ -97,6 +103,16 @@ internal static class SettingsLifecycleBridge
 				api.ReinjectSettings();
 			}
 		}), (uint)GodotObject.ConnectFlags.OneShot);
+
+		if (connectResult != Error.Ok)
+		{
+			lock (Sync)
+			{
+				_reinjectQueued = false;
+			}
+
+			GD.PrintErr($"[ReForge.Settings] Failed to queue reinject on ProcessFrame. error={connectResult}");
+		}
 	}
 
 	private static void RegisterApi(ReForgeSettingsApi api)

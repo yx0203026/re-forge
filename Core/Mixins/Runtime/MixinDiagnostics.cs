@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using ReForgeFramework.Mixins.Runtime.Reflection;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
@@ -42,6 +43,10 @@ public sealed record MixinLifecycleStatusView(
 	int ScannerErrors,
 	int ScannerWarnings,
 	int UnpatchFailures,
+	int WarmupResolved,
+	int WarmupRequiredFailures,
+	int WarmupOptionalFailures,
+	long WarmupDurationMs,
 	string Message,
 	DateTimeOffset UpdatedAtUtc
 );
@@ -53,7 +58,8 @@ public sealed record MixinDiagnosticsSnapshot(
 	int AppliedPatchCount,
 	IReadOnlyList<MixinRegistrationStatusView> Registrations,
 	IReadOnlyList<MixinLifecycleStatusView> Lifecycles,
-	IReadOnlyList<MixinAppliedEntryView> AppliedPatches
+	IReadOnlyList<MixinAppliedEntryView> AppliedPatches,
+	ReflectionRuntimeSnapshot Reflection
 );
 
 internal sealed class MixinDiagnostics
@@ -61,11 +67,13 @@ internal sealed class MixinDiagnostics
 	public MixinDiagnosticsSnapshot BuildSnapshot(
 		MixinStatusSnapshot registrationStatus,
 		MixinLifecycleSnapshot lifecycleSnapshot,
-		IReadOnlyList<MixinAppliedEntry> appliedEntries)
+		IReadOnlyList<MixinAppliedEntry> appliedEntries,
+		ReflectionRuntimeSnapshot reflectionSnapshot)
 	{
 		ArgumentNullException.ThrowIfNull(registrationStatus);
 		ArgumentNullException.ThrowIfNull(lifecycleSnapshot);
 		ArgumentNullException.ThrowIfNull(appliedEntries);
+		ArgumentNullException.ThrowIfNull(reflectionSnapshot);
 
 		List<MixinRegistrationStatusView> registrationViews = new();
 		foreach (KeyValuePair<string, MixinRegistrationResult> pair in registrationStatus.Registrations)
@@ -100,6 +108,10 @@ internal sealed class MixinDiagnostics
 				status.Counters.ScannerErrors,
 				status.Counters.ScannerWarnings,
 				status.Counters.UnpatchFailures,
+				status.Counters.WarmupResolved,
+				status.Counters.WarmupRequiredFailures,
+				status.Counters.WarmupOptionalFailures,
+				status.Counters.WarmupDurationMs,
 				status.Message,
 				status.UpdatedAtUtc
 			));
@@ -133,7 +145,8 @@ internal sealed class MixinDiagnostics
 			patchViews.Count,
 			new ReadOnlyCollection<MixinRegistrationStatusView>(registrationViews),
 			new ReadOnlyCollection<MixinLifecycleStatusView>(lifecycleViews),
-			new ReadOnlyCollection<MixinAppliedEntryView>(patchViews)
+			new ReadOnlyCollection<MixinAppliedEntryView>(patchViews),
+			reflectionSnapshot
 		);
 	}
 

@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 
@@ -16,6 +17,8 @@ internal sealed record ValidatedMixinInjection(
 
 internal sealed class MixinValidation
 {
+	private static readonly ConcurrentDictionary<Type, Dictionary<string, IReadOnlyList<MethodInfo>>> _targetMethodIndexCache = new();
+
 	public bool TryValidateMixinType(
 		Type mixinType,
 		global::ReForge.MixinAttribute mixinAttribute,
@@ -181,15 +184,15 @@ internal sealed class MixinValidation
 				return false;
 			}
 
-			if (handlerMethod.GetParameters().Length != targetMethod.GetParameters().Length)
+			ParameterInfo[] overwriteHandlerParameters = handlerParameters;
+			ParameterInfo[] targetParameters = targetMethod.GetParameters();
+			if (overwriteHandlerParameters.Length != targetParameters.Length)
 			{
 				error =
-					$"Overwrite parameter count mismatch. method='{methodId}', target='{targetMethod.DeclaringType?.FullName}.{targetMethod.Name}', expected={targetMethod.GetParameters().Length}, actual={handlerMethod.GetParameters().Length}.";
+					$"Overwrite parameter count mismatch. method='{methodId}', target='{targetMethod.DeclaringType?.FullName}.{targetMethod.Name}', expected={targetParameters.Length}, actual={overwriteHandlerParameters.Length}.";
 				return false;
 			}
 
-			ParameterInfo[] targetParameters = targetMethod.GetParameters();
-			ParameterInfo[] overwriteHandlerParameters = handlerMethod.GetParameters();
 			for (int i = 0; i < targetParameters.Length; i++)
 			{
 				if (overwriteHandlerParameters[i].ParameterType != targetParameters[i].ParameterType)
@@ -280,17 +283,10 @@ internal sealed class MixinValidation
 			return false;
 		}
 
-		List<MethodInfo> candidates = new();
-		MethodInfo[] methods = targetType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-		for (int i = 0; i < methods.Length; i++)
+		Dictionary<string, IReadOnlyList<MethodInfo>> methodIndex = GetOrBuildTargetMethodIndex(targetType);
+		if (!methodIndex.TryGetValue(targetMethodName, out IReadOnlyList<MethodInfo>? candidates))
 		{
-			MethodInfo method = methods[i];
-			if (!string.Equals(method.Name, targetMethodName, StringComparison.Ordinal))
-			{
-				continue;
-			}
-
-			candidates.Add(method);
+			candidates = Array.Empty<MethodInfo>();
 		}
 
 		if (candidates.Count == 0)
@@ -298,17 +294,6 @@ internal sealed class MixinValidation
 			error = $"Target method not found. targetType='{targetType.FullName}', method='{targetMethodName}'.";
 			return false;
 		}
-
-		candidates.Sort(static (a, b) =>
-		{
-			int byName = string.CompareOrdinal(a.Name, b.Name);
-			if (byName != 0)
-			{
-				return byName;
-			}
-
-			return a.MetadataToken.CompareTo(b.MetadataToken);
-		});
 
 		if (ordinal >= 0)
 		{
@@ -340,6 +325,36 @@ internal sealed class MixinValidation
 		return true;
 	}
 
+	private static Dictionary<string, IReadOnlyList<MethodInfo>> GetOrBuildTargetMethodIndex(Type targetType)
+	{
+		return _targetMethodIndexCache.GetOrAdd(targetType, static type =>
+		{
+			MethodInfo[] methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+			Dictionary<string, List<MethodInfo>> groups = new(StringComparer.Ordinal);
+
+			for (int i = 0; i < methods.Length; i++)
+			{
+				MethodInfo method = methods[i];
+				if (!groups.TryGetValue(method.Name, out List<MethodInfo>? list))
+				{
+					list = new List<MethodInfo>();
+					groups[method.Name] = list;
+				}
+
+				list.Add(method);
+			}
+
+			Dictionary<string, IReadOnlyList<MethodInfo>> index = new(StringComparer.Ordinal);
+			foreach ((string methodName, List<MethodInfo> list) in groups)
+			{
+				list.Sort(static (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+				index[methodName] = list;
+			}
+
+			return index;
+		});
+	}
+
 	private static bool RequiresNonByRefHandlerParameters(InjectionKind kind)
 	{
 		return kind == InjectionKind.ModifyArg
@@ -354,6 +369,7 @@ internal sealed class MixinValidation
 		out MethodInfo? resolved)
 	{
 		resolved = null;
+		ParameterInfo[] handlerParameters = handlerMethod.GetParameters();
 
 		if (attribute is global::ReForge.OverwriteAttribute)
 		{
@@ -366,7 +382,6 @@ internal sealed class MixinValidation
 				}
 
 				ParameterInfo[] candidateParameters = candidate.GetParameters();
-				ParameterInfo[] handlerParameters = handlerMethod.GetParameters();
 				if (candidateParameters.Length != handlerParameters.Length)
 				{
 					continue;

@@ -135,14 +135,12 @@ internal sealed class MixinScanner
 	{
 		lock (_syncRoot)
 		{
-			if (!_assemblyInjectionKeys.Remove(cacheKey, out HashSet<string>? existingKeys) || existingKeys == null)
+			if (_assemblyInjectionKeys.Remove(cacheKey, out HashSet<string>? existingKeys) && existingKeys != null)
 			{
-				return;
-			}
-
-			foreach (string key in existingKeys)
-			{
-				_registeredInjectionKeys.Remove(key);
+				foreach (string key in existingKeys)
+				{
+					_registeredInjectionKeys.Remove(key);
+				}
 			}
 
 			if (_assemblyShadowKeys.Remove(cacheKey, out HashSet<string>? existingShadowKeys) && existingShadowKeys != null)

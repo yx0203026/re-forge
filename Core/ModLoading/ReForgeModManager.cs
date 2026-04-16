@@ -28,6 +28,11 @@ public static class ReForgeModManager
 	private static readonly EmbeddedResourceSource EmbeddedSource = new();
 	private static readonly ReForgeModLifecycle Lifecycle = new(FileIo, Diagnostics, PckSource, EmbeddedSource);
 	private static readonly List<ReForgeModContext> Contexts = new();
+	private static readonly object ResourceCacheSync = new();
+	private static readonly Dictionary<string, byte[]> ResourceBytesCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly HashSet<string> ResourceMissCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly Dictionary<string, Texture2D> TextureCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly HashSet<string> TextureMissCache = new(StringComparer.OrdinalIgnoreCase);
 	private static ReForgeModSettings _activeSettings = ReForgeModSettingsStore.Clone(ReForgeModSettings.Default);
 
 	public static event Action<ReForgeModContext>? OnModDetected;
@@ -40,6 +45,7 @@ public static class ReForgeModManager
 		}
 
 		_initialized = true;
+		ClearResourceCaches();
 		ReForgeModSettings actualSettings = settings ?? ReForgeModSettingsStore.Load();
 		actualSettings = MergeWithOfficialModSettings(actualSettings);
 		_activeSettings = ReForgeModSettingsStore.Clone(actualSettings);
@@ -140,7 +146,6 @@ public static class ReForgeModManager
 		ResolveReferencePaths(
 			gameRoot,
 			out string reforgeDllPath,
-			out string harmonyDllPath,
 			out string sts2DllPath);
 
 		if (Directory.Exists(modRoot))
@@ -166,7 +171,6 @@ public static class ReForgeModManager
 			string csproj = BuildProjectFileText(
 				resourceFolderName,
 				reforgeDllPath,
-				harmonyDllPath,
 				sts2DllPath);
 			File.WriteAllText(projectFilePath, csproj, Encoding.UTF8);
 
@@ -586,6 +590,7 @@ public static class ReForgeModManager
 
 		string modId = manifest.Id;
 		SetModEnabledForNextLaunch(modId, enabled: true);
+		ClearResourceCaches();
 
 		ReForgeModContext? loadedContext = Contexts.FirstOrDefault(mod => mod.ModId.Equals(modId, StringComparison.OrdinalIgnoreCase)
 			&& mod.State == ReForgeModLoadState.Loaded);
@@ -806,28 +811,59 @@ public static class ReForgeModManager
 		}
 
 		string normalized = ResourcePathResolver.Normalize(resourcePath);
+		lock (ResourceCacheSync)
+		{
+			if (ResourceBytesCache.TryGetValue(normalized, out byte[]? cachedBytes))
+			{
+				bytes = cachedBytes;
+				return true;
+			}
+
+			if (ResourceMissCache.Contains(normalized))
+			{
+				return false;
+			}
+		}
+
 		if (preferredMod != null && TryReadFromMod(preferredMod, normalized, out bytes))
 		{
+			CacheResourceHit(normalized, bytes);
 			return true;
 		}
 
+		ReForgeModContext? owner = null;
 		string? ownerModId = ResourcePathResolver.ResolveOwnerModId(normalized);
 		if (!string.IsNullOrWhiteSpace(ownerModId))
 		{
-			ReForgeModContext? owner = Contexts.FirstOrDefault(m => m.ModId.Equals(ownerModId, StringComparison.OrdinalIgnoreCase));
+			owner = Contexts.FirstOrDefault(m => m.ModId.Equals(ownerModId, StringComparison.OrdinalIgnoreCase));
 			if (owner != null && TryReadFromMod(owner, normalized, out bytes))
 			{
+				CacheResourceHit(normalized, bytes);
 				return true;
 			}
 		}
 
-		foreach (ReForgeModContext mod in Contexts.Where(CanReadResourcesFromMod))
+		for (int i = 0; i < Contexts.Count; i++)
 		{
+			ReForgeModContext mod = Contexts[i];
+			if (!CanReadResourcesFromMod(mod))
+			{
+				continue;
+			}
+
+			if (ReferenceEquals(mod, preferredMod) || ReferenceEquals(mod, owner))
+			{
+				continue;
+			}
+
 			if (TryReadFromMod(mod, normalized, out bytes))
 			{
+				CacheResourceHit(normalized, bytes);
 				return true;
 			}
 		}
+
+		CacheResourceMiss(normalized);
 
 		return false;
 	}
@@ -840,19 +876,77 @@ public static class ReForgeModManager
 	public static bool TryLoadTexture(string resourcePath, out Texture2D texture)
 	{
 		texture = null!;
-		if (!TryReadResourceBytes(resourcePath, out byte[] bytes))
+		string normalized = ResourcePathResolver.Normalize(resourcePath);
+		lock (ResourceCacheSync)
 		{
+			if (TextureCache.TryGetValue(normalized, out Texture2D? cached)
+				&& GodotObject.IsInstanceValid(cached))
+			{
+				texture = cached;
+				return true;
+			}
+
+			TextureCache.Remove(normalized);
+			if (TextureMissCache.Contains(normalized))
+			{
+				return false;
+			}
+		}
+
+		if (!TryReadResourceBytes(normalized, out byte[] bytes))
+		{
+			lock (ResourceCacheSync)
+			{
+				TextureMissCache.Add(normalized);
+			}
 			return false;
 		}
 
 		Godot.Image image = new();
 		if (image.LoadPngFromBuffer(bytes) != Error.Ok)
 		{
+			lock (ResourceCacheSync)
+			{
+				TextureMissCache.Add(normalized);
+			}
 			return false;
 		}
 
 		texture = ImageTexture.CreateFromImage(image);
+		lock (ResourceCacheSync)
+		{
+			TextureCache[normalized] = texture;
+			TextureMissCache.Remove(normalized);
+		}
 		return true;
+	}
+
+	private static void CacheResourceHit(string normalizedPath, byte[] bytes)
+	{
+		lock (ResourceCacheSync)
+		{
+			ResourceBytesCache[normalizedPath] = bytes;
+			ResourceMissCache.Remove(normalizedPath);
+		}
+	}
+
+	private static void CacheResourceMiss(string normalizedPath)
+	{
+		lock (ResourceCacheSync)
+		{
+			ResourceMissCache.Add(normalizedPath);
+		}
+	}
+
+	private static void ClearResourceCaches()
+	{
+		lock (ResourceCacheSync)
+		{
+			ResourceBytesCache.Clear();
+			ResourceMissCache.Clear();
+			TextureCache.Clear();
+			TextureMissCache.Clear();
+		}
 	}
 
 	private static bool TryReadFromMod(ReForgeModContext mod, string normalizedPath, out byte[] bytes)
@@ -898,6 +992,7 @@ public static class ReForgeModManager
 	{
 		try
 		{
+			ClearResourceCaches();
 			LocalizationResourceBridge.RefreshCurrentLanguage();
 
 			if (LocManager.Instance != null)
@@ -1194,7 +1289,6 @@ public static class ReForgeModManager
 	private static string BuildProjectFileText(
 		string resourceFolderName,
 		string reforgeDllPath,
-		string harmonyDllPath,
 		string sts2DllPath)
 	{
 		StringBuilder builder = new();
@@ -1210,10 +1304,6 @@ public static class ReForgeModManager
 		builder.AppendLine("  <ItemGroup>");
 		builder.AppendLine("    <Reference Include=\"ReForge\">");
 		builder.AppendLine($"      <HintPath>{EscapeXmlValue(reforgeDllPath)}</HintPath>");
-		builder.AppendLine("      <Private>false</Private>");
-		builder.AppendLine("    </Reference>");
-		builder.AppendLine("    <Reference Include=\"0Harmony\">");
-		builder.AppendLine($"      <HintPath>{EscapeXmlValue(harmonyDllPath)}</HintPath>");
 		builder.AppendLine("      <Private>false</Private>");
 		builder.AppendLine("    </Reference>");
 		builder.AppendLine("    <Reference Include=\"sts2\">");
@@ -1235,13 +1325,11 @@ public static class ReForgeModManager
 	private static void ResolveReferencePaths(
 		string gameRoot,
 		out string reforgeDllPath,
-		out string harmonyDllPath,
 		out string sts2DllPath)
 	{
 		reforgeDllPath = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
 
 		string dataDirectory = Path.Combine(gameRoot, "data_sts2_windows_x86_64");
-		harmonyDllPath = Path.GetFullPath(Path.Combine(dataDirectory, "0Harmony.dll"));
 		sts2DllPath = Path.GetFullPath(Path.Combine(dataDirectory, "sts2.dll"));
 	}
 
@@ -1285,32 +1373,238 @@ public static class ReForgeModManager
 	private static string BuildModMainText(string modName)
 	{
 		string modNamespace = BuildCSharpIdentifier(modName) + ".Generated";
-		string harmonyId = BuildResourceFolderName(modName) + ".mod";
+		string modId = BuildResourceFolderName(modName) + ".mod";
 
 		StringBuilder builder = new();
-		builder.AppendLine("using Godot;");
-		builder.AppendLine("using HarmonyLib;");
+		builder.AppendLine("using System;");
+		builder.AppendLine("using System.Collections.Generic;");
 		builder.AppendLine("using MegaCrit.Sts2.Core.Modding;");
+		builder.AppendLine("using MegaCrit.Sts2.Core.Runs;");
 		builder.AppendLine();
 		builder.Append("namespace ").Append(modNamespace).AppendLine(";");
 		builder.AppendLine();
 		builder.AppendLine("[ModInitializer(nameof(Initialize))]");
-		builder.AppendLine("public static class ModMain");
+		builder.AppendLine("public sealed class ModMain : ReForgeModBase");
 		builder.AppendLine("{");
-		builder.AppendLine("\tprivate static bool _initialized;");
-		builder.AppendLine("\tprivate static Harmony? _harmony;");
+		builder.Append("\tprotected override string ModId => \"").Append(modId).AppendLine("\";");
 		builder.AppendLine();
 		builder.AppendLine("\tprivate static void Initialize()");
 		builder.AppendLine("\t{");
-		builder.AppendLine("\t\tif (_initialized)");
-		builder.AppendLine("\t\t{");
-		builder.AppendLine("\t\t\treturn;");
-		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t\tBootstrap<ModMain>();");
+		builder.AppendLine("\t}");
 		builder.AppendLine();
-		builder.AppendLine("\t\t_initialized = true;");
-		builder.Append("\t\t_harmony = new Harmony(\"").Append(harmonyId).AppendLine("\");");
-		builder.AppendLine("\t\t_harmony.PatchAll();");
-		builder.Append("\t\tGD.Print(\"[").Append(harmonyId).AppendLine("] initialized.\");");
+		builder.AppendLine("\tprotected override bool EnableRunStartedHook => true;");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> AscensionRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 阶段(A11/A12/...)注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> CardRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 卡牌注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> PowerRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 力量注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> RelicRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 遗物注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> PotionRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 药水注册（当前版本占位）");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> MonsterRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 怪物注册（当前版本占位）");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> BossRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: Boss 注册（当前版本占位）");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> CardPoolRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 卡池注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> EventRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 普通事件注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> AncientEventRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 远古事件注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<Action> InitializationRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 通用初始化注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string modelEntry, string resourcePath)> CardPortraitRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 卡牌立绘注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string modelEntry, string resourcePath)> RelicIconRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 遗物图标注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string modelEntry, string resourcePath)> RelicIconOutlineRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 遗物描边图标注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string modelEntry, string resourcePath)> RelicBigIconRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 遗物大图注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string modelEntry, string resourcePath)> PowerIconRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 力量小图标注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string modelEntry, string resourcePath)> PowerBigIconRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 力量大图标注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string textureKey, string resourcePath)> PotionPortraitRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 药水纹理注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string textureKey, string resourcePath)> MonsterPortraitRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 怪物纹理注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string textureKey, string resourcePath)> BossPortraitRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: Boss 纹理注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string textureKey, string resourcePath)> UiTextureRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: UI 纹理注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string textureKey, string resourcePath)> BackgroundTextureRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 背景纹理注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override IEnumerable<(string textureKey, string resourcePath)> MiscTextureRegistrations");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\tget");
+		builder.AppendLine("\t\t{");
+		builder.AppendLine("\t\t\t// TODO: 其他纹理注册");
+		builder.AppendLine("\t\t\tyield break;");
+		builder.AppendLine("\t\t}");
+		builder.AppendLine("\t}");
+		builder.AppendLine();
+		builder.AppendLine("\tprotected override void OnRunStarted(RunState _)");
+		builder.AppendLine("\t{");
+		builder.AppendLine("\t\t// TODO: run-start logic");
 		builder.AppendLine("\t}");
 		builder.AppendLine("}");
 

@@ -1,8 +1,8 @@
 #nullable enable
 
 using System;
-using System.Collections.Generic;
 using System.Reflection;
+using ReForgeFramework.Mixins.Runtime.Reflection;
 
 namespace ReForgeFramework.Mixins.Runtime;
 
@@ -24,6 +24,13 @@ namespace ReForgeFramework.Mixins.Runtime;
 /// </remarks>
 internal sealed class HarmonyTargetResolver
 {
+	private readonly IReflectionAccessor _reflectionAccessor;
+
+	public HarmonyTargetResolver(IReflectionAccessor? reflectionAccessor = null)
+	{
+		_reflectionAccessor = reflectionAccessor ?? new ReflectionAccessor();
+	}
+
 	/// <summary>
 	/// 在目标类型中解析指定的目标方法。
 	/// </summary>
@@ -61,60 +68,34 @@ internal sealed class HarmonyTargetResolver
 			return false;
 		}
 
-		if (injection.TargetMethod != null)
+		string signatureKey = injection.TargetMethodSignatureKey;
+		if (string.IsNullOrWhiteSpace(signatureKey) && injection.TargetMethod != null)
 		{
-			if (string.Equals(injection.TargetMethod.Name, targetMethodName, StringComparison.Ordinal)
-				&& injection.TargetMethod.DeclaringType != null
-				&& injection.TargetMethod.DeclaringType.IsAssignableFrom(targetType))
-			{
-				targetMethod = injection.TargetMethod;
-				return true;
-			}
+			signatureKey = ReflectionSignatureBuilder.BuildMethodSignature(injection.TargetMethod);
 		}
 
-		MethodInfo[] methods = targetType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-		List<MethodInfo> candidates = new();
-		for (int i = 0; i < methods.Length; i++)
-		{
-			MethodInfo method = methods[i];
-			if (!string.Equals(method.Name, targetMethodName, StringComparison.Ordinal))
-			{
-				continue;
-			}
+		ReflectionMemberKey key = new(
+			targetType,
+			targetMethodName,
+			ReflectionMemberKind.Method,
+			signatureKey,
+			injection.Ordinal);
+		ReflectionAccessContext context = new(
+			Owner: nameof(HarmonyTargetResolver),
+			Operation: nameof(TryResolveTargetMethod),
+			DescriptorKey: injection.DescriptorKey,
+			Notes: descriptor.MixinId);
 
-			candidates.Add(method);
-		}
-
-		if (candidates.Count == 0)
+		if (!_reflectionAccessor.TryResolveMethod(key, context, out MethodInfo? resolvedMethod, out ReflectionAccessError? accessError)
+			|| resolvedMethod == null)
 		{
+			string accessMessage = accessError?.ToString() ?? "Unknown reflection resolve error.";
 			error =
-				$"Target method not found. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', descriptorKey='{injection.DescriptorKey}'.";
+				$"Target method resolution failed. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', descriptorKey='{injection.DescriptorKey}'. detail={accessMessage}";
 			return false;
 		}
 
-		candidates.Sort(static (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
-
-		if (injection.Ordinal >= 0)
-		{
-			if (injection.Ordinal >= candidates.Count)
-			{
-				error =
-					$"Target method ordinal out of range. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', ordinal={injection.Ordinal}, candidateCount={candidates.Count}, descriptorKey='{injection.DescriptorKey}'.";
-				return false;
-			}
-
-			targetMethod = candidates[injection.Ordinal];
-			return true;
-		}
-
-		if (candidates.Count > 1)
-		{
-			error =
-				$"Target method is ambiguous; set Ordinal explicitly. mixin='{descriptor.MixinType.FullName}', targetType='{targetType.FullName}', method='{targetMethodName}', candidateCount={candidates.Count}, descriptorKey='{injection.DescriptorKey}'.";
-			return false;
-		}
-
-		targetMethod = candidates[0];
+		targetMethod = resolvedMethod;
 		return true;
 	}
 }

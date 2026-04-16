@@ -32,3 +32,13 @@ public interface IReForgeRelicTextureProvider
 
 	bool TryGetBigIconTexture(out Texture2D texture);
 }
+
+/// <summary>
+/// 可选 Power 纹理提供接口。
+/// </summary>
+public interface IReForgePowerTextureProvider
+{
+	bool TryGetIconTexture(out Texture2D texture);
+
+	bool TryGetBigIconTexture(out Texture2D texture);
+}

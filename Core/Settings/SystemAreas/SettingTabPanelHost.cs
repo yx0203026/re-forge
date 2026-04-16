@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using ReForgeFramework.Settings.Controls;
+using ReForgeFramework.Settings.Internal;
 
 namespace ReForgeFramework.Settings.SystemAreas;
 
@@ -122,27 +123,24 @@ public sealed class SettingTabPanelHost
 				return;
 			}
 
-			if (runtimeTab.HasMeta(MetaBindRetryScheduledKey))
-			{
-				return;
-			}
-
-			if (Engine.GetMainLoop() is not SceneTree tree)
-			{
-				return;
-			}
-
-			runtimeTab.SetMeta(MetaBindRetryScheduledKey, true);
-			tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(() =>
+			bool scheduled = ReForge.LifecycleSafety.TryScheduleOnNextProcessFrame(
+				runtimeTab,
+				MetaBindRetryScheduledKey,
+				() =>
 			{
 				if (!GodotObject.IsInstanceValid(runtimeTab))
 				{
 					return;
 				}
 
-				runtimeTab.SetMeta(MetaBindRetryScheduledKey, false);
 				TryMountAndBind();
-			}), (uint)GodotObject.ConnectFlags.OneShot);
+			},
+			out _);
+
+			if (!scheduled)
+			{
+				return;
+			}
 		}
 
 		TryMountAndBind();
@@ -161,16 +159,7 @@ public sealed class SettingTabPanelHost
 			return true;
 		}
 
-		if (tab.GetParent() == null)
-		{
-			manager.AddChild(tab);
-		}
-		else
-		{
-			tab.Reparent(manager, keepGlobalTransform: true);
-		}
-
-		return true;
+		return ReForge.LifecycleSafety.TryAttachOrReparent(manager, tab, keepGlobalTransform: true, out _);
 	}
 
 	private static bool TryBindToOfficialManager(NSettingsTabManager manager, NSettingsTab tab, SettingTab tabModel, bool selectWhenBound)
@@ -233,12 +222,7 @@ public sealed class SettingTabPanelHost
 			return;
 		}
 
-		MethodInfo? switchTabTo = manager.GetType().GetMethod(
-			"SwitchTabTo",
-			BindingFlags.Instance | BindingFlags.NonPublic,
-			null,
-			new[] { typeof(NSettingsTab) },
-			null);
+		MethodInfo? switchTabTo = SettingsReflectionCache.GetSwitchTabToMethod(manager.GetType());
 
 		if (switchTabTo == null)
 		{
@@ -269,12 +253,7 @@ public sealed class SettingTabPanelHost
 
 	private static void SelectTabDeferred(NSettingsTabManager manager, NSettingsTab tab)
 	{
-		MethodInfo? switchTabTo = manager.GetType().GetMethod(
-			"SwitchTabTo",
-			BindingFlags.Instance | BindingFlags.NonPublic,
-			null,
-			new[] { typeof(NSettingsTab) },
-			null);
+		MethodInfo? switchTabTo = SettingsReflectionCache.GetSwitchTabToMethod(manager.GetType());
 
 		if (switchTabTo == null)
 		{
@@ -375,7 +354,7 @@ public sealed class SettingTabPanelHost
 
 	private static void TrySetArrowDirection(Control button, bool isLeft)
 	{
-		PropertyInfo? isLeftProperty = button.GetType().GetProperty("IsLeft", BindingFlags.Instance | BindingFlags.Public);
+		PropertyInfo? isLeftProperty = SettingsReflectionCache.GetIsLeftProperty(button.GetType());
 		if (isLeftProperty?.CanWrite == true && isLeftProperty.PropertyType == typeof(bool))
 		{
 			if (button.IsNodeReady())
@@ -394,7 +373,7 @@ public sealed class SettingTabPanelHost
 						return;
 					}
 
-					PropertyInfo? lateIsLeftProperty = button.GetType().GetProperty("IsLeft", BindingFlags.Instance | BindingFlags.Public);
+					PropertyInfo? lateIsLeftProperty = SettingsReflectionCache.GetIsLeftProperty(button.GetType());
 					if (lateIsLeftProperty?.CanWrite == true && lateIsLeftProperty.PropertyType == typeof(bool))
 					{
 						lateIsLeftProperty.SetValue(button, isLeft);
@@ -726,13 +705,15 @@ public sealed class SettingTabPanelHost
 
 		try
 		{
-			PropertyInfo? isEnabledProperty = button.GetType().GetProperty("IsEnabled", BindingFlags.Instance | BindingFlags.Public);
+			PropertyInfo? isEnabledProperty = SettingsReflectionCache.GetIsEnabledProperty(button.GetType());
 			if (isEnabledProperty?.CanWrite == true && isEnabledProperty.PropertyType == typeof(bool))
 			{
 				isEnabledProperty.SetValue(button, !disabled);
 			}
 
-			MethodInfo? toggler = button.GetType().GetMethod(disabled ? "Disable" : "Enable", BindingFlags.Instance | BindingFlags.Public);
+			MethodInfo? toggler = disabled
+				? SettingsReflectionCache.GetDisableMethod(button.GetType())
+				: SettingsReflectionCache.GetEnableMethod(button.GetType());
 			toggler?.Invoke(button, null);
 		}
 		catch
@@ -802,7 +783,7 @@ public sealed class SettingTabPanelHost
 	private static bool TryGetTabsDictionary(NSettingsTabManager manager, out IDictionary? tabs)
 	{
 		tabs = null;
-		FieldInfo? tabsField = manager.GetType().GetField("_tabs", BindingFlags.Instance | BindingFlags.NonPublic);
+		FieldInfo? tabsField = SettingsReflectionCache.GetTabsField(manager.GetType());
 		if (tabsField?.GetValue(manager) is IDictionary dictionary)
 		{
 			tabs = dictionary;
