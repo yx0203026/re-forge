@@ -580,7 +580,7 @@ public static partial class ReForge
 			}
 		}
 
-		private static void ClearDynamicState(NMapScreen mapScreen)
+		internal static void ClearDynamicState(NMapScreen mapScreen)
 		{
 			TryGetMapScreenFieldValue(mapScreen, NMapScreenMapBgContainerField, out Control mapBg);
 			ApplyBackgroundScaleY(mapBg, 1f);
@@ -638,6 +638,19 @@ internal static class ReForgeMapLayoutRoomsPatch
 [HarmonyPatch(typeof(NMapScreen), nameof(NMapScreen.SetMap))]
 internal static class ReForgeMapLayoutSetMapPatch
 {
+	[HarmonyPrefix]
+	private static void Prefix(NMapScreen __instance)
+	{
+		try
+		{
+			ReForge.MapLayout.ClearDynamicState(__instance);
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.MapLayout] SetMap prefix clear-state failed: {ex}");
+		}
+	}
+
 	[HarmonyPostfix]
 	private static void Postfix(NMapScreen __instance)
 	{
@@ -678,6 +691,7 @@ internal static class ReForgeMapLayoutScrollPatch
 			return true;
 		}
 
+		Vector2 previousMapPosition = mapContainer.Position;
 		Vector2 originalTarget = target;
 
 		if (mapContainer.Position != target)
@@ -709,7 +723,12 @@ internal static class ReForgeMapLayoutScrollPatch
 
 		ReForge.MapLayout.TrySetTargetDragPos(__instance, target);
 		bool targetAdjusted = target != originalTarget;
-		if (targetAdjusted || ReForge.MapLayout.ShouldForceRemoteCursorSync(__instance, mapContainer.Position))
+		bool mapMoved = mapContainer.Position.DistanceSquaredTo(previousMapPosition) > 0.01f;
+
+		// 联机才需要远端光标同步；并且必须发生实际地图运动或目标修正。
+		if (ReForge.Network.IsConnected &&
+			(isDragging || mapMoved || targetAdjusted) &&
+			ReForge.MapLayout.ShouldForceRemoteCursorSync(__instance, mapContainer.Position))
 		{
 			NGame.Instance?.RemoteCursorContainer?.ForceUpdateAllCursors();
 		}

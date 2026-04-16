@@ -123,27 +123,24 @@ public sealed class SettingTabPanelHost
 				return;
 			}
 
-			if (runtimeTab.HasMeta(MetaBindRetryScheduledKey))
-			{
-				return;
-			}
-
-			if (Engine.GetMainLoop() is not SceneTree tree)
-			{
-				return;
-			}
-
-			runtimeTab.SetMeta(MetaBindRetryScheduledKey, true);
-			tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(() =>
+			bool scheduled = ReForge.LifecycleSafety.TryScheduleOnNextProcessFrame(
+				runtimeTab,
+				MetaBindRetryScheduledKey,
+				() =>
 			{
 				if (!GodotObject.IsInstanceValid(runtimeTab))
 				{
 					return;
 				}
 
-				runtimeTab.SetMeta(MetaBindRetryScheduledKey, false);
 				TryMountAndBind();
-			}), (uint)GodotObject.ConnectFlags.OneShot);
+			},
+			out _);
+
+			if (!scheduled)
+			{
+				return;
+			}
 		}
 
 		TryMountAndBind();
@@ -162,16 +159,7 @@ public sealed class SettingTabPanelHost
 			return true;
 		}
 
-		if (tab.GetParent() == null)
-		{
-			manager.AddChild(tab);
-		}
-		else
-		{
-			tab.Reparent(manager, keepGlobalTransform: true);
-		}
-
-		return true;
+		return ReForge.LifecycleSafety.TryAttachOrReparent(manager, tab, keepGlobalTransform: true, out _);
 	}
 
 	private static bool TryBindToOfficialManager(NSettingsTabManager manager, NSettingsTab tab, SettingTab tabModel, bool selectWhenBound)

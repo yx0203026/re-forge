@@ -307,6 +307,12 @@ public static partial class ReForge
 				return;
 			}
 
+			if (serializableRun.Players != null && serializableRun.Players.Count > 1)
+			{
+				AdvanceMultiplayerProgressAfterWin(serializableRun.Ascension);
+				return;
+			}
+
 			if (serializableRun.Players == null || serializableRun.Players.Count != 1)
 			{
 				return;
@@ -387,35 +393,130 @@ public static partial class ReForge
 			int configured = MaxAscension;
 			try
 			{
+				SyncMultiplayerProgressFromExtendedStore();
+
 				ProgressState progress = SaveManager.Instance.Progress;
-				int mergedMax = Math.Max(progress.MaxMultiplayerAscension, configured);
-				if (progress.MaxMultiplayerAscension != mergedMax)
+				int clampedMax = Math.Clamp(progress.MaxMultiplayerAscension, VanillaMaxAscension, configured);
+				if (progress.MaxMultiplayerAscension != clampedMax)
 				{
-					progress.MaxMultiplayerAscension = mergedMax;
+					progress.MaxMultiplayerAscension = clampedMax;
 				}
 
-				if (progress.PreferredMultiplayerAscension > mergedMax)
+				if (progress.PreferredMultiplayerAscension > clampedMax)
 				{
-					progress.PreferredMultiplayerAscension = mergedMax;
+					progress.PreferredMultiplayerAscension = clampedMax;
 				}
 
-				return mergedMax;
+				return clampedMax;
 			}
 			catch
 			{
-				return configured;
+				return VanillaMaxAscension;
+			}
+		}
+
+		internal static void SyncMultiplayerProgressFromExtendedStore()
+		{
+			int configured = MaxAscension;
+			int storedMax;
+			int storedPreferred;
+
+			lock (SyncRoot)
+			{
+				EnsureProgressLoadedLocked();
+				storedMax = Math.Clamp(_progress.MaxMultiplayerAscension, VanillaMaxAscension, configured);
+				storedPreferred = Math.Clamp(_progress.PreferredMultiplayerAscension, VanillaMaxAscension, storedMax);
+			}
+
+			try
+			{
+				ProgressState progress = SaveManager.Instance.Progress;
+				int runtimeMax = Math.Clamp(progress.MaxMultiplayerAscension, VanillaMaxAscension, configured);
+				int mergedMax = Math.Max(runtimeMax, storedMax);
+				int runtimePreferred = Math.Clamp(progress.PreferredMultiplayerAscension, VanillaMaxAscension, mergedMax);
+				int mergedPreferred = Math.Clamp(Math.Max(runtimePreferred, storedPreferred), VanillaMaxAscension, mergedMax);
+
+				bool changed = false;
+				if (progress.MaxMultiplayerAscension != mergedMax)
+				{
+					progress.MaxMultiplayerAscension = mergedMax;
+					changed = true;
+				}
+
+				if (progress.PreferredMultiplayerAscension != mergedPreferred)
+				{
+					progress.PreferredMultiplayerAscension = mergedPreferred;
+					changed = true;
+				}
+
+				if (changed)
+				{
+					SaveManager.Instance.SaveProgressFile();
+				}
+			}
+			catch
+			{
+				// 读取阶段允许静默降级，不影响游戏流程。
 			}
 		}
 
 		internal static int NormalizeMultiplayerUnlockedMaxAscension(int unlocked)
 		{
-			int floor = Math.Max(VanillaMaxAscension, unlocked);
-			return Math.Max(floor, GetMultiplayerUnlockedMaxAscension());
+			return Math.Clamp(unlocked, VanillaMaxAscension, MaxAscension);
+		}
+
+		internal static int UnlockMultiplayerAscensionTo(int targetAscension)
+		{
+			int configured = MaxAscension;
+			int target = Math.Clamp(targetAscension, VanillaMaxAscension + 1, configured);
+
+			ProgressState progress = SaveManager.Instance.Progress;
+			int currentMax = Math.Clamp(progress.MaxMultiplayerAscension, VanillaMaxAscension, configured);
+			int unlocked = Math.Max(currentMax, target);
+
+			bool changed = false;
+			if (progress.MaxMultiplayerAscension != unlocked)
+			{
+				progress.MaxMultiplayerAscension = unlocked;
+				changed = true;
+			}
+
+			if (progress.PreferredMultiplayerAscension < unlocked)
+			{
+				progress.PreferredMultiplayerAscension = unlocked;
+				changed = true;
+			}
+
+			if (changed)
+			{
+				SaveManager.Instance.SaveProgressFile();
+				SaveStoredMultiplayerProgress(unlocked, progress.PreferredMultiplayerAscension);
+			}
+
+			return unlocked;
 		}
 
 		internal static void NormalizeLobbyJoinRequest(ref ClientLobbyJoinRequestMessage message)
 		{
-			message.maxAscensionUnlocked = NormalizeMultiplayerUnlockedMaxAscension(message.maxAscensionUnlocked);
+			// 统一上报本地真实多人解锁进度，避免把“配置上限”当作“已解锁上限”广播给主机。
+			message.maxAscensionUnlocked = GetMultiplayerUnlockedMaxAscension();
+		}
+
+		internal static int ClampMultiplayerAscensionToLobbyMin(StartRunLobby lobby, int ascension)
+		{
+			if (lobby == null || !lobby.NetService.Type.IsMultiplayer())
+			{
+				return ascension;
+			}
+
+			int minUnlocked = VanillaMaxAscension;
+			if (lobby.Players.Count > 0)
+			{
+				minUnlocked = lobby.Players.Min(static player => player.maxMultiplayerAscensionUnlocked);
+			}
+
+			minUnlocked = Math.Clamp(minUnlocked, 0, MaxAscension);
+			return Math.Clamp(ascension, 0, minUnlocked);
 		}
 
 		private static void EnsureRunStartedHook()
@@ -609,6 +710,91 @@ public static partial class ReForge
 
 				progress.MaxAscension = currentMax;
 				progress.PreferredAscension = currentMax;
+				SaveProgressLocked();
+			}
+		}
+
+		private static void AdvanceMultiplayerProgressAfterWin(int runAscension)
+		{
+			if (runAscension < VanillaMaxAscension)
+			{
+				return;
+			}
+
+			try
+			{
+				ProgressState progress = SaveManager.Instance.Progress;
+				int configured = MaxAscension;
+				int currentMax = Math.Clamp(progress.MaxMultiplayerAscension, VanillaMaxAscension, configured);
+				int nextMax = currentMax;
+				bool changed = false;
+
+				if (runAscension > nextMax)
+				{
+					nextMax = Math.Min(runAscension, configured);
+				}
+
+				if (runAscension == nextMax && nextMax < configured)
+				{
+					nextMax++;
+				}
+
+				if (nextMax < VanillaMaxAscension)
+				{
+					nextMax = VanillaMaxAscension;
+				}
+
+				if (nextMax <= currentMax && progress.PreferredMultiplayerAscension == nextMax)
+				{
+					return;
+				}
+
+				if (progress.MaxMultiplayerAscension != nextMax)
+				{
+					progress.MaxMultiplayerAscension = nextMax;
+					changed = true;
+				}
+
+				if (progress.PreferredMultiplayerAscension < nextMax)
+				{
+					progress.PreferredMultiplayerAscension = nextMax;
+					changed = true;
+				}
+				else if (progress.PreferredMultiplayerAscension > nextMax)
+				{
+					progress.PreferredMultiplayerAscension = nextMax;
+					changed = true;
+				}
+
+				if (changed)
+				{
+					SaveManager.Instance.SaveProgressFile();
+					SaveStoredMultiplayerProgress(nextMax, progress.PreferredMultiplayerAscension);
+				}
+			}
+			catch (Exception ex)
+			{
+				GD.PrintErr($"[ReForge.Ascension] failed to advance multiplayer ascension progress. {ex}");
+			}
+		}
+
+		private static void SaveStoredMultiplayerProgress(int maxAscension, int preferredAscension)
+		{
+			int configured = MaxAscension;
+			int clampedMax = Math.Clamp(maxAscension, VanillaMaxAscension, configured);
+			int clampedPreferred = Math.Clamp(preferredAscension, VanillaMaxAscension, clampedMax);
+
+			lock (SyncRoot)
+			{
+				EnsureProgressLoadedLocked();
+				if (_progress.MaxMultiplayerAscension == clampedMax
+					&& _progress.PreferredMultiplayerAscension == clampedPreferred)
+				{
+					return;
+				}
+
+				_progress.MaxMultiplayerAscension = clampedMax;
+				_progress.PreferredMultiplayerAscension = clampedPreferred;
 				SaveProgressLocked();
 			}
 		}
@@ -825,6 +1011,10 @@ public sealed class CharacterExtendedAscensionProgress
 public sealed class ExtendedAscensionProgressData
 {
 	public Dictionary<string, CharacterExtendedAscensionProgress> ByCharacter { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+	public int MaxMultiplayerAscension { get; set; } = 10;
+
+	public int PreferredMultiplayerAscension { get; set; } = 10;
 }
 
 [HarmonyPatch(typeof(SaveManager), nameof(SaveManager.SaveRun))]
@@ -859,6 +1049,16 @@ internal static class ReForgeExtendedAscensionMultiplayerLoadPatch
 	private static void Postfix(ulong localPlayerId, ref ReadSaveResult<SerializableRun> __result)
 	{
 		__result = ReForge.Ascension.ResolveMultiplayerLoad(__result, localPlayerId);
+	}
+}
+
+[HarmonyPatch(typeof(SaveManager), nameof(SaveManager.InitProgressData))]
+internal static class ReForgeExtendedAscensionInitProgressPatch
+{
+	[HarmonyPostfix]
+	private static void Postfix()
+	{
+		ReForge.Ascension.SyncMultiplayerProgressFromExtendedStore();
 	}
 }
 
@@ -909,6 +1109,16 @@ internal static class ReForgeExtendedAscensionLobbyPlayerAddPatch
 	private static void Prefix(ref int maxAscensionUnlocked)
 	{
 		maxAscensionUnlocked = ReForge.Ascension.NormalizeMultiplayerUnlockedMaxAscension(maxAscensionUnlocked);
+	}
+}
+
+[HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SyncAscensionChange))]
+internal static class ReForgeExtendedAscensionSyncAscensionPatch
+{
+	[HarmonyPrefix]
+	private static void Prefix(StartRunLobby __instance, ref int ascension)
+	{
+		ascension = ReForge.Ascension.ClampMultiplayerAscensionToLobbyMin(__instance, ascension);
 	}
 }
 

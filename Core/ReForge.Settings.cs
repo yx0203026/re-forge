@@ -23,8 +23,17 @@ public static partial class ReForge
 			return;
 		}
 
-		_settingsInitialized = true;
-		RegisterSettingsUi();
+		try
+		{
+			RegisterSettingsUi();
+			_settingsInitialized = true;
+		}
+		catch (Exception ex)
+		{
+			_settingsInitialized = false;
+			GD.PrintErr($"[ReForge.Settings] InitializeRuntimeSettings failed; initialization flag reset for retry. {ex}");
+			throw;
+		}
 	}
 
 	private static void ApplyPostInitializationSettings()

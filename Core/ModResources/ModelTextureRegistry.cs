@@ -9,7 +9,7 @@ namespace ReForgeFramework.ModResources;
 
 /// <summary>
 /// ReForge 纹理注册中心：
-/// 允许外部模组按模型 ID 注册卡牌/遗物纹理加载委托，
+/// 允许外部模组按模型 ID 注册卡牌/遗物/Power 纹理加载委托，
 /// 再由 Harmony 补丁在官方 getter 执行后做结果兜底覆盖。
 /// </summary>
 public static class ModelTextureRegistry
@@ -20,6 +20,8 @@ public static class ModelTextureRegistry
 	private static readonly Dictionary<string, Func<RelicModel, Texture2D?>> RelicIconLoaders = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly Dictionary<string, Func<RelicModel, Texture2D?>> RelicIconOutlineLoaders = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly Dictionary<string, Func<RelicModel, Texture2D?>> RelicBigIconLoaders = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly Dictionary<string, Func<PowerModel, Texture2D?>> PowerIconLoaders = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly Dictionary<string, Func<PowerModel, Texture2D?>> PowerBigIconLoaders = new(StringComparer.OrdinalIgnoreCase);
 
 	#region 注册 API
 
@@ -77,6 +79,34 @@ public static class ModelTextureRegistry
 		ArgumentException.ThrowIfNullOrWhiteSpace(modelEntry);
 		ArgumentNullException.ThrowIfNull(loader);
 		RegisterLoader(RelicBigIconLoaders, modelEntry, loader);
+	}
+
+	public static void RegisterPowerIcon(ModelId modelId, Func<PowerModel, Texture2D?> loader)
+	{
+		ArgumentNullException.ThrowIfNull(modelId);
+		ArgumentNullException.ThrowIfNull(loader);
+		RegisterLoader(PowerIconLoaders, modelId, loader);
+	}
+
+	public static void RegisterPowerIcon(string modelEntry, Func<PowerModel, Texture2D?> loader)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(modelEntry);
+		ArgumentNullException.ThrowIfNull(loader);
+		RegisterLoader(PowerIconLoaders, modelEntry, loader);
+	}
+
+	public static void RegisterPowerBigIcon(ModelId modelId, Func<PowerModel, Texture2D?> loader)
+	{
+		ArgumentNullException.ThrowIfNull(modelId);
+		ArgumentNullException.ThrowIfNull(loader);
+		RegisterLoader(PowerBigIconLoaders, modelId, loader);
+	}
+
+	public static void RegisterPowerBigIcon(string modelEntry, Func<PowerModel, Texture2D?> loader)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(modelEntry);
+		ArgumentNullException.ThrowIfNull(loader);
+		RegisterLoader(PowerBigIconLoaders, modelEntry, loader);
 	}
 
 	#endregion
@@ -137,6 +167,34 @@ public static class ModelTextureRegistry
 		ArgumentNullException.ThrowIfNull(relic);
 		return TryResolveTexture(RelicBigIconLoaders, modelId, relic, out texture)
 			|| TryResolveTexture(RelicBigIconLoaders, relic.Id, relic, out texture);
+	}
+
+	public static bool TryResolvePowerIcon(PowerModel power, out Texture2D texture)
+	{
+		ArgumentNullException.ThrowIfNull(power);
+		return TryResolveTexture(PowerIconLoaders, power.Id, power, out texture);
+	}
+
+	public static bool TryResolvePowerIcon(ModelId modelId, PowerModel power, out Texture2D texture)
+	{
+		ArgumentNullException.ThrowIfNull(modelId);
+		ArgumentNullException.ThrowIfNull(power);
+		return TryResolveTexture(PowerIconLoaders, modelId, power, out texture)
+			|| TryResolveTexture(PowerIconLoaders, power.Id, power, out texture);
+	}
+
+	public static bool TryResolvePowerBigIcon(PowerModel power, out Texture2D texture)
+	{
+		ArgumentNullException.ThrowIfNull(power);
+		return TryResolveTexture(PowerBigIconLoaders, power.Id, power, out texture);
+	}
+
+	public static bool TryResolvePowerBigIcon(ModelId modelId, PowerModel power, out Texture2D texture)
+	{
+		ArgumentNullException.ThrowIfNull(modelId);
+		ArgumentNullException.ThrowIfNull(power);
+		return TryResolveTexture(PowerBigIconLoaders, modelId, power, out texture)
+			|| TryResolveTexture(PowerBigIconLoaders, power.Id, power, out texture);
 	}
 
 	#endregion

@@ -8,7 +8,7 @@ public static partial class ReForge
 	/// <summary>
 	/// ReForge UI 工具能力入口。
 	/// </summary>
-	public static class UI
+	public static partial class UI
 	{
 		/// <summary>
 		/// 先尝试官方 Ancient CanvasGroup 遮罩，失败后自动回退到本地圆角裁切。

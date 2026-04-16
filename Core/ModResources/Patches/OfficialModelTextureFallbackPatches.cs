@@ -28,6 +28,30 @@ public static class OfficialModelTextureFallbackPatches
 
 	#endregion
 
+	#region Power
+
+	[HarmonyPatch(typeof(PowerModel), "get_Icon")]
+	[HarmonyPostfix]
+	private static void PowerIconPostfix(PowerModel __instance, ref Texture2D __result)
+	{
+		if (TryResolvePowerIcon(__instance, out Texture2D texture))
+		{
+			__result = texture;
+		}
+	}
+
+	[HarmonyPatch(typeof(PowerModel), "get_BigIcon")]
+	[HarmonyPostfix]
+	private static void PowerBigIconPostfix(PowerModel __instance, ref Texture2D __result)
+	{
+		if (TryResolvePowerBigIcon(__instance, out Texture2D texture))
+		{
+			__result = texture;
+		}
+	}
+
+	#endregion
+
 	#region 遗物
 
 	[HarmonyPatch(typeof(RelicModel), "get_Icon")]
@@ -136,5 +160,53 @@ public static class OfficialModelTextureFallbackPatches
 		}
 
 		return ModelTextureRegistry.TryResolveRelicBigIcon(relic, out texture);
+	}
+
+	private static bool TryResolvePowerIcon(PowerModel power, out Texture2D texture)
+	{
+		texture = null!;
+
+		if (power is IReForgePowerTextureProvider provider
+			&& provider.TryGetIconTexture(out texture))
+		{
+			return true;
+		}
+
+		if (power is IReForgeTextureModelIdProvider idProvider
+			&& ModelTextureRegistry.TryResolvePowerIcon(idProvider.TextureModelId, power, out texture))
+		{
+			return true;
+		}
+
+		if (ModelTextureRegistry.TryResolvePowerIcon(power, out texture))
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	private static bool TryResolvePowerBigIcon(PowerModel power, out Texture2D texture)
+	{
+		texture = null!;
+
+		if (power is IReForgePowerTextureProvider provider
+			&& provider.TryGetBigIconTexture(out texture))
+		{
+			return true;
+		}
+
+		if (power is IReForgeTextureModelIdProvider idProvider
+			&& ModelTextureRegistry.TryResolvePowerBigIcon(idProvider.TextureModelId, power, out texture))
+		{
+			return true;
+		}
+
+		if (ModelTextureRegistry.TryResolvePowerBigIcon(power, out texture))
+		{
+			return true;
+		}
+
+		return false;
 	}
 }

@@ -137,6 +137,12 @@ internal static class EventOptionPagerRuntime
 		}
 
 		HBoxContainer pagerHost = EnsurePagerHost(optionsContainer, layoutId, isAncient);
+		if (pagerHost.GetParent() == null)
+		{
+			ScheduleEnsureRetry(layout, patchId, "pager_host_attach_failed");
+			return;
+		}
+
 		Control prevButton = EnsurePagerButton(pagerHost, PagerPrevButtonName, isLeft: true, layoutId);
 		Control nextButton = EnsurePagerButton(pagerHost, PagerNextButtonName, isLeft: false, layoutId);
 		Label pageText = EnsurePagerText(pagerHost);
@@ -348,7 +354,10 @@ internal static class EventOptionPagerRuntime
 
 		if (host.GetParent() == null)
 		{
-			targetHostParent.AddChild(host);
+			if (!ReForge.LifecycleSafety.TryAddChild(targetHostParent, host, out _))
+			{
+				return host;
+			}
 		}
 
 		if (useInlineHost)
@@ -396,7 +405,10 @@ internal static class EventOptionPagerRuntime
 		gap.CustomMinimumSize = new Vector2(0f, isAncient ? AncientPagerInlineGap : NormalPagerInlineGap);
 		if (gap.GetParent() == null)
 		{
-			optionsContainer.AddChild(gap);
+			if (!ReForge.LifecycleSafety.TryAddChild(optionsContainer, gap, out _))
+			{
+				return;
+			}
 		}
 
 		int desiredIndex = Mathf.Min(optionsContainer.GetChildCount() - 1, 1);
@@ -451,7 +463,10 @@ internal static class EventOptionPagerRuntime
 
 		if (button.GetParent() == null)
 		{
-			host.AddChild(button);
+			if (!ReForge.LifecycleSafety.TryAddChild(host, button, out _))
+			{
+				return button;
+			}
 		}
 
 		TrySetArrowDirection(button, isLeft);
@@ -548,7 +563,7 @@ internal static class EventOptionPagerRuntime
 			CustomMinimumSize = new Vector2(80f, 0f),
 			Text = "1/1"
 		};
-		host.AddChild(text);
+		ReForge.LifecycleSafety.TryAddChild(host, text, out _);
 		return text;
 	}
 
@@ -570,7 +585,10 @@ internal static class EventOptionPagerRuntime
 			CustomMinimumSize = Vector2.Zero
 		};
 
-		host.AddChild(spacer);
+		if (!ReForge.LifecycleSafety.TryAddChild(host, spacer, out _))
+		{
+			return spacer;
+		}
 		return spacer;
 	}
 
@@ -1121,42 +1139,23 @@ internal static class EventOptionPagerRuntime
 			return;
 		}
 
-		bool hasPendingRetry = false;
-		if (layout.HasMeta(MetaPagerEnsureRetryPendingKey))
-		{
-			try
-			{
-				hasPendingRetry = layout.GetMeta(MetaPagerEnsureRetryPendingKey).AsBool();
-			}
-			catch
-			{
-				hasPendingRetry = false;
-			}
-		}
-		if (hasPendingRetry)
-		{
-			return;
-		}
-
 		layout.SetMeta(MetaPagerEnsureRetryCountKey, retryCount + 1);
-		layout.SetMeta(MetaPagerEnsureRetryPendingKey, true);
-
-		if (Engine.GetMainLoop() is SceneTree tree)
+		if (ReForge.LifecycleSafety.TryScheduleOnNextProcessFrame(
+			layout,
+			MetaPagerEnsureRetryPendingKey,
+			() => EnsureForLayout(layout, $"{patchId}.retry"),
+			out string scheduleFailure))
 		{
-			tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(() =>
-			{
-				if (!GodotObject.IsInstanceValid(layout))
-				{
-					return;
-				}
-
-				layout.SetMeta(MetaPagerEnsureRetryPendingKey, false);
-				EnsureForLayout(layout, $"{patchId}.retry");
-			}), (uint)GodotObject.ConnectFlags.OneShot);
 			return;
 		}
 
-		layout.SetMeta(MetaPagerEnsureRetryPendingKey, false);
+		EmitLayoutDiagnostic(
+			severity: EventWheelSeverity.Warning,
+			layout: layout,
+			eventModel: null,
+			patchId: patchId,
+			message: $"Event option pager retry scheduling failed. reason='{scheduleFailure}'.",
+			context: null);
 	}
 
 	private static void TryEmitLayoutSnapshot(
