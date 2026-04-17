@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Runs;
+using Sts2Player = MegaCrit.Sts2.Core.Entities.Players.Player;
 
 /// <summary>
 /// 解锁当前角色的下一阶段（或指定阶段）。
@@ -24,7 +25,7 @@ public sealed class NextAscensionConsoleCmd : AbstractConsoleCmd
 
 	public override bool IsNetworked => false;
 
-	public override CmdResult Process(Player? issuingPlayer, string[] args)
+	public override CmdResult Process(Sts2Player? issuingPlayer, string[] args)
 	{
 		if (!TryParseOptionalAscension(args, out int? target, out string parseError))
 		{
@@ -55,7 +56,7 @@ public sealed class NextAscensionConsoleCmd : AbstractConsoleCmd
 			RunState? runState = RunManager.Instance.DebugOnlyGetState();
 			if (runState != null)
 			{
-				Player? me = LocalContext.GetMe(runState);
+				Sts2Player? me = LocalContext.GetMe(runState);
 				if (me != null && me.Character?.Id != null && me.Character.Id != ModelId.none && me.Character is not RandomCharacter)
 				{
 					characterId = me.Character.Id;
@@ -140,7 +141,7 @@ public sealed class NextMpAscensionConsoleCmd : AbstractConsoleCmd
 
 	public override bool IsNetworked => false;
 
-	public override CmdResult Process(Player? issuingPlayer, string[] args)
+	public override CmdResult Process(Sts2Player? issuingPlayer, string[] args)
 	{
 		if (!TryParseOptionalAscension(args, out int? target, out string parseError))
 		{
@@ -199,7 +200,7 @@ public sealed class NextAscensionAllConsoleCmd : AbstractConsoleCmd
 
 	public override bool IsNetworked => false;
 
-	public override CmdResult Process(Player? issuingPlayer, string[] args)
+	public override CmdResult Process(Sts2Player? issuingPlayer, string[] args)
 	{
 		if (!TryParseOptionalAscension(args, out int? target, out string parseError))
 		{

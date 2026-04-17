@@ -264,6 +264,7 @@ public static partial class ReForge
 			TryRegisterBuiltInMessage<ReForgeModelCatalogHelloMessage>(service, ReForgeBuiltinMessageIds.ModelCatalogHello);
 			TryRegisterBuiltInMessage<ReForgeModelCatalogResultMessage>(service, ReForgeBuiltinMessageIds.ModelCatalogResult);
 			TryRegisterBuiltInMessage<ReForgeCombatTimelyEventSyncMessage>(service, ReForgeBuiltinMessageIds.CombatTimelyEventSync);
+			TryRegisterBuiltInMessage<ReForgePlayerSyncMessage>(service, ReForgeBuiltinMessageIds.PlayerSync);
 		}
 
 		private static void TryRegisterBuiltInMessage<T>(ReForgeNetService service, byte id) where T : IReForgeNetMessage, new()

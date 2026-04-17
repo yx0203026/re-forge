@@ -14,4 +14,5 @@ internal static class ReForgeBuiltinMessageIds
 	public const byte ModelCatalogHello = 243;
 	public const byte ModelCatalogResult = 244;
 	public const byte CombatTimelyEventSync = 245;
+	public const byte PlayerSync = 246;
 }

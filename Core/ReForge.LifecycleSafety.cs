@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Runs;
+using Sts2Player = MegaCrit.Sts2.Core.Entities.Players.Player;
 
 public static partial class ReForge
 {
@@ -233,14 +234,14 @@ public static partial class ReForge
 			}
 		}
 
-		internal static bool IsPlayerChoiceReady(Player player, bool requireOverlayForLocal = true)
+		internal static bool IsPlayerChoiceReady(Sts2Player player, bool requireOverlayForLocal = true)
 		{
 			ArgumentNullException.ThrowIfNull(player);
 			return TryGetPlayerChoiceReadinessFailure(player, requireOverlayForLocal) == null;
 		}
 
 		internal static async Task<bool> WaitForPlayerChoiceReadyAsync(
-			Player player,
+			Sts2Player player,
 			int maxFramesToWait = DefaultMaxFramesToWait,
 			bool requireOverlayForLocal = true)
 		{
@@ -282,7 +283,7 @@ public static partial class ReForge
 			return completionSource.Task;
 		}
 
-		internal static void EnsurePlayerChoiceReady(Player player, bool requireOverlayForLocal = true)
+		internal static void EnsurePlayerChoiceReady(Sts2Player player, bool requireOverlayForLocal = true)
 		{
 			ArgumentNullException.ThrowIfNull(player);
 
@@ -297,7 +298,7 @@ public static partial class ReForge
 			}
 		}
 
-		private static string? TryGetPlayerChoiceReadinessFailure(Player player, bool requireOverlayForLocal)
+		private static string? TryGetPlayerChoiceReadinessFailure(Sts2Player player, bool requireOverlayForLocal)
 		{
 			if (!IsMainLoopReady())
 			{

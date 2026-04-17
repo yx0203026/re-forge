@@ -42,6 +42,7 @@ internal sealed class ReForgeNetMessageBus
 		_writer.WriteByte(_registry.GetMessageId(message));
 		_writer.WriteULong(senderId);
 		message.Serialize(_writer);
+		_writer.ZeroByteRemainder();
 
 		byte[] buffer = _writer.ToArray();
 		length = buffer.Length;
