@@ -65,6 +65,11 @@ internal static class EventOptionPagerRuntime
 	private static int _configuredNormalOptionsPerPage = DefaultOptionsPerPage;
 	private static int _configuredAncientOptionsPerPage = DefaultOptionsPerPage;
 
+	/// <summary>
+	/// 配置分页大小。
+	/// </summary>
+	/// <param name="normalOptionsPerPage">普通事件每页选项数；为空保持原值。</param>
+	/// <param name="ancientOptionsPerPage">远古事件每页选项数；为空保持原值。</param>
 	internal static void Configure(int? normalOptionsPerPage, int? ancientOptionsPerPage)
 	{
 		lock (SyncRoot)
@@ -81,6 +86,12 @@ internal static class EventOptionPagerRuntime
 		}
 	}
 
+	/// <summary>
+	/// 为指定布局确保分页条与当前页可见性状态。
+	/// </summary>
+	/// <param name="layout">事件布局节点。</param>
+	/// <param name="patchId">调用来源标识，用于诊断定位。</param>
+	/// <param name="focusVisibleOption">是否在分页后聚焦当前页首个可见选项。</param>
 	internal static void EnsureForLayout(NEventLayout layout, string patchId, bool focusVisibleOption = false)
 	{
 		if (!GodotObject.IsInstanceValid(layout))
@@ -174,6 +185,10 @@ internal static class EventOptionPagerRuntime
 			isAncient: isAncient);
 	}
 
+	/// <summary>
+	/// 根据事件类型与配置源解析最终每页数量。
+	/// 环境变量优先级高于 ProjectSettings 与运行时 Configure。
+	/// </summary>
 	private static int ResolvePageSize(bool isAncient)
 	{
 		int configured = isAncient ? _configuredAncientOptionsPerPage : _configuredNormalOptionsPerPage;

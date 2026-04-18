@@ -7,6 +7,10 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel.Examples;
 
+/// <summary>
+/// 普通事件 EventWheel 最小接入示例。
+/// 展示定义注册、规则注册与诊断读取流程。
+/// </summary>
 public static class ExampleNormalEventRegistration
 {
 	public const string DemoEventId = "REFORGE_EXAMPLE_NORMAL";
@@ -19,6 +23,10 @@ public static class ExampleNormalEventRegistration
 	private static bool _configured;
 
 	// 最小可运行路径：定义 -> 注册 -> 变更规则 -> 读取诊断。
+	/// <summary>
+	/// 配置并注册示例事件。
+	/// </summary>
+	/// <param name="enableDemo">是否启用示例。</param>
 	public static void Configure(bool enableDemo = true)
 	{
 		if (!enableDemo || _configured)
@@ -39,6 +47,9 @@ public static class ExampleNormalEventRegistration
 		PrintRegisterDiagnostics(limit: 8);
 	}
 
+	/// <summary>
+	/// 读取注册阶段诊断。
+	/// </summary>
 	public static IReadOnlyList<EventWheelDiagnosticEvent> ReadRegisterDiagnostics(int limit = 20)
 	{
 		int normalizedLimit = limit <= 0 ? 20 : limit;

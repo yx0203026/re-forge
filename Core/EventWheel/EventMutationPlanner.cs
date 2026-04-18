@@ -8,15 +8,30 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// 事件变更规划器。
+/// 负责按规则优先级与顺序构建稳定、可执行的选项计划。
+/// </summary>
 internal sealed class EventMutationPlanner
 {
 	private readonly EventWheelDiagnostics? _diagnostics;
 
+	/// <summary>
+	/// 创建规划器。
+	/// </summary>
 	public EventMutationPlanner(EventWheelDiagnostics? diagnostics = null)
 	{
 		_diagnostics = diagnostics;
 	}
 
+	/// <summary>
+	/// 生成事件变更计划。
+	/// </summary>
+	/// <param name="eventModel">事件模型上下文。</param>
+	/// <param name="definition">事件定义。</param>
+	/// <param name="rules">候选变更规则集合。</param>
+	/// <param name="sourcePriorityByModId">可选来源优先级映射。</param>
+	/// <returns>包含步骤、最终选项与告警的规划结果。</returns>
 	public EventMutationPlan BuildPlan(
 		EventModel? eventModel,
 		IEventDefinition? definition,

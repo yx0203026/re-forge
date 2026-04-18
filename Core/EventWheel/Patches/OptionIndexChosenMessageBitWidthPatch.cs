@@ -38,6 +38,10 @@ internal static class OptionIndexChosenMessageBitWidthPatch
 	};
 
 	[HarmonyPrepare]
+	/// <summary>
+	/// 补丁预检查。
+	/// 仅在启用开关且目标消息类型存在时返回 true。
+	/// </summary>
 	private static bool Prepare()
 	{
 		if (!global::ReForge.IsOptionIndex8BitPatchEnabled())
@@ -58,6 +62,9 @@ internal static class OptionIndexChosenMessageBitWidthPatch
 	}
 
 	[HarmonyTargetMethods]
+	/// <summary>
+	/// 枚举可能包含 optionIndex 位宽读写的目标方法。
+	/// </summary>
 	private static IEnumerable<MethodBase> TargetMethods()
 	{
 		Type? messageType = ResolveMessageType();
@@ -92,6 +99,10 @@ internal static class OptionIndexChosenMessageBitWidthPatch
 	}
 
 	[HarmonyTranspiler]
+	/// <summary>
+	/// 将位宽常量从 4 替换为 8。
+	/// 仅修改紧邻位 IO 调用的常量加载指令，降低误改风险。
+	/// </summary>
 	private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase original)
 	{
 		List<CodeInstruction> codes = instructions.ToList();

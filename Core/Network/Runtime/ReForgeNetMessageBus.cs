@@ -34,13 +34,17 @@ internal sealed class ReForgeNetMessageBus
 		_registry = registry;
 	}
 
-	public byte[] SerializeMessage(ulong senderId, IReForgeNetMessage message, out int length)
+	public byte[] SerializeMessage(ulong senderId, IReForgeNetMessage message, bool includeSenderHeader, out int length)
 	{
 		ArgumentNullException.ThrowIfNull(message);
 
 		_writer.Reset();
 		_writer.WriteByte(_registry.GetMessageId(message));
-		_writer.WriteULong(senderId);
+		if (includeSenderHeader)
+		{
+			_writer.WriteULong(senderId);
+		}
+
 		message.Serialize(_writer);
 		_writer.ZeroByteRemainder();
 
@@ -49,10 +53,51 @@ internal sealed class ReForgeNetMessageBus
 		return buffer;
 	}
 
-	public bool TryDeserializeMessage(byte[] packetBytes, out IReForgeNetMessage? message, out ulong senderId)
+	public bool TryDeserializeMessage(
+		byte[] packetBytes,
+		ReForgeNetProtocolInteropMode interopMode,
+		out IReForgeNetMessage? message,
+		out ulong senderId)
 	{
 		ArgumentNullException.ThrowIfNull(packetBytes);
 
+		message = null;
+		senderId = 0;
+
+		return interopMode switch
+		{
+			ReForgeNetProtocolInteropMode.ReForgeOnly =>
+				TryDeserializeCore(packetBytes, includeSenderHeader: true, logUnknownId: true, out message, out senderId),
+			ReForgeNetProtocolInteropMode.OfficialOnly =>
+				TryDeserializeCore(packetBytes, includeSenderHeader: false, logUnknownId: true, out message, out senderId),
+			_ => TryDeserializeHybrid(packetBytes, out message, out senderId)
+		};
+	}
+
+	private bool TryDeserializeHybrid(byte[] packetBytes, out IReForgeNetMessage? message, out ulong senderId)
+	{
+		// Hybrid 优先尝试官方原生格式，失败后再回退 ReForge 带 sender 头格式。
+		if (TryDeserializeCore(packetBytes, includeSenderHeader: false, logUnknownId: false, out message, out senderId))
+		{
+			return true;
+		}
+
+		if (TryDeserializeCore(packetBytes, includeSenderHeader: true, logUnknownId: false, out message, out senderId))
+		{
+			return true;
+		}
+
+		GD.PrintErr("[ReForge.Network] Failed to deserialize packet in Hybrid mode (official/reforge formats both failed).");
+		return false;
+	}
+
+	private bool TryDeserializeCore(
+		byte[] packetBytes,
+		bool includeSenderHeader,
+		bool logUnknownId,
+		out IReForgeNetMessage? message,
+		out ulong senderId)
+	{
 		message = null;
 		senderId = 0;
 
@@ -62,7 +107,11 @@ internal sealed class ReForgeNetMessageBus
 			byte messageId = _reader.ReadByte();
 			if (!_registry.TryCreateMessage(messageId, out IReForgeNetMessage? created))
 			{
-				GD.PrintErr($"[ReForge.Network] Unknown message id: {messageId}.");
+				if (logUnknownId)
+				{
+					GD.PrintErr($"[ReForge.Network] Unknown message id: {messageId}.");
+				}
+
 				return false;
 			}
 
@@ -72,14 +121,26 @@ internal sealed class ReForgeNetMessageBus
 				return false;
 			}
 
-			senderId = _reader.ReadULong();
+			if (includeSenderHeader)
+			{
+				senderId = _reader.ReadULong();
+			}
+			else
+			{
+				senderId = 0;
+			}
+
 			created.Deserialize(_reader);
 			message = created;
 			return true;
 		}
 		catch (Exception ex)
 		{
-			GD.PrintErr($"[ReForge.Network] Failed to deserialize packet. {ex}");
+			if (logUnknownId)
+			{
+				GD.PrintErr($"[ReForge.Network] Failed to deserialize packet. {ex}");
+			}
+
 			return false;
 		}
 	}

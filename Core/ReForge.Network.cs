@@ -16,6 +16,7 @@ public static partial class ReForge
 		private static ReForgeNetService? _service;
 		private static ReForgeNetworkDiagnosticsRuntime? _diagnostics;
 		private static ReForgeModelCatalogHandshakeRuntime? _catalogHandshake;
+		private static ReForgeNetProtocolInteropMode _interopMode = ReForgeNetProtocolInteropMode.Hybrid;
 		private static bool _initialized;
 		private static bool _autoPumpAttached;
 		private static bool _autoPumpCreated;
@@ -33,6 +34,19 @@ public static partial class ReForge
 
 		public static string? LastModelCatalogMismatchReason => _catalogHandshake?.LastMismatchReason;
 
+		public static ReForgeNetProtocolInteropMode InteropMode
+		{
+			get => _interopMode;
+			set
+			{
+				_interopMode = value;
+				if (_service != null)
+				{
+					_service.SetProtocolInteropMode(value);
+				}
+			}
+		}
+
 		public static void Initialize(ulong localPeerId = 1)
 		{
 			lock (SyncRoot)
@@ -42,7 +56,7 @@ public static partial class ReForge
 					return;
 				}
 
-				_service = new ReForgeNetService(new ReForgeLoopbackTransport(localPeerId));
+				_service = new ReForgeNetService(new ReForgeLoopbackTransport(localPeerId), _interopMode);
 				RegisterBuiltInMessages(_service);
 				_diagnostics = new ReForgeNetworkDiagnosticsRuntime(_service, GetUtcNowMs);
 				_catalogHandshake = new ReForgeModelCatalogHandshakeRuntime(_service, GetUtcNowMs);
@@ -69,13 +83,23 @@ public static partial class ReForge
 			GD.Print($"[ReForge.Network] switched transport to '{transport.GetType().FullName}'.");
 		}
 
-		public static void UseENetHostSkeleton(ushort port, int maxClients = 4, ulong localPeerId = 1)
+		public static void UseENetHostSkeleton(
+			ushort port,
+			int maxClients = 4,
+			ulong localPeerId = 1,
+			ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid)
 		{
+			InteropMode = interopMode;
 			UseTransport(ReForgeENetTransport.CreateHost(port, maxClients, localPeerId));
 		}
 
-		public static void UseENetClientSkeleton(string host, ushort port, ulong localPeerId)
+		public static void UseENetClientSkeleton(
+			string host,
+			ushort port,
+			ulong localPeerId,
+			ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid)
 		{
+			InteropMode = interopMode;
 			UseTransport(ReForgeENetTransport.CreateClient(host, port, localPeerId));
 		}
 
@@ -85,9 +109,11 @@ public static partial class ReForge
 			ulong localPeerId,
 			bool autoReconnect,
 			int maxReconnectAttempts,
+			ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid,
 			int reconnectInitialDelayMs = 500,
 			int reconnectMaxDelayMs = 8000)
 		{
+			InteropMode = interopMode;
 			UseTransport(ReForgeENetTransport.CreateClient(
 				host,
 				port,

@@ -13,9 +13,16 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel.Patches;
 
+/// <summary>
+/// 普通事件选项补丁。
+/// 在 EventModel 生成初始选项后注入 EventWheel 规则执行。
+/// </summary>
 [HarmonyPatch(typeof(EventModel), "GenerateInitialOptionsWrapper")]
 internal static class EventModelOptionPatches
 {
+	/// <summary>
+	/// Postfix：对普通事件选项应用 EventWheel 变更。
+	/// </summary>
 	[HarmonyPostfix]
 	private static void Postfix(EventModel __instance, ref IReadOnlyList<EventOption> __result)
 	{
@@ -27,11 +34,19 @@ internal static class EventModelOptionPatches
 	}
 }
 
+/// <summary>
+/// EventWheel 选项补丁运行时。
+/// 聚合定义查询、计划构建、执行落地、异常降级与诊断发射。
+/// </summary>
 internal static class EventWheelOptionPatchRuntime
 {
 	private const string PatchSourceModId = "reforge.eventwheel.patch";
 	private static int _runtimeUnavailableLogged;
 
+	/// <summary>
+	/// 尝试对当前事件模型应用变更。
+	/// 失败时以诊断与日志方式降级，不中断原流程。
+	/// </summary>
 	internal static void TryApplyMutation(
 		EventModel? model,
 		ref IReadOnlyList<EventOption> options,

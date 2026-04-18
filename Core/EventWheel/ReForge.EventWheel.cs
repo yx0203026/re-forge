@@ -12,6 +12,10 @@ using ReForgeFramework.ModLoading;
 
 public static partial class ReForge
 {
+	/// <summary>
+	/// EventWheel 事件扩展轮盘入口。
+	/// 负责初始化运行时组件、注册事件定义/变更规则、管理诊断查询与选项工厂。
+	/// </summary>
 	public static class EventWheel
 	{
 		private static readonly object SyncRoot = new();
@@ -26,12 +30,27 @@ public static partial class ReForge
 		private static ReForgeFramework.EventWheel.EventWheelDiagnostics? _diagnostics;
 		private static readonly Dictionary<string, Func<EventModel, IEventOptionDefinition, EventOption>> OptionFactories = new(StringComparer.Ordinal);
 
+		/// <summary>
+		/// 获取 EventWheel 是否已完成初始化标记。
+		/// </summary>
 		public static bool IsInitialized => _initialized;
 
+		/// <summary>
+		/// 获取 EventWheel 是否处于降级状态。
+		/// 降级状态下不会执行运行时事件变更逻辑。
+		/// </summary>
 		public static bool IsDegraded => _degraded;
 
+		/// <summary>
+		/// 获取最近一次初始化异常的详细文本。
+		/// 当无异常时返回空字符串。
+		/// </summary>
 		public static string LastInitializationError => _lastInitializationError;
 
+		/// <summary>
+		/// 初始化 EventWheel 运行时。
+		/// 会扫描核心程序集与已加载模组程序集，自动注册 IEventDefinition 与 IEventMutationRule 实现。
+		/// </summary>
 		public static void Initialize()
 		{
 			lock (SyncRoot)
@@ -145,6 +164,11 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 注册事件定义。
+		/// </summary>
+		/// <param name="definition">事件定义对象；为空时返回失败结果。</param>
+		/// <returns>注册结果，包含成功状态、事件标识与诊断消息。</returns>
 		public static EventRegistrationResult RegisterDefinition(IEventDefinition? definition)
 		{
 			EnsureInitialized();
@@ -161,6 +185,11 @@ public static partial class ReForge
 			return registry!.RegisterDefinition(definition);
 		}
 
+		/// <summary>
+		/// 注册事件选项变更规则。
+		/// </summary>
+		/// <param name="rule">变更规则对象；为空时返回失败结果。</param>
+		/// <returns>注册结果，包含成功状态、错误码与消息。</returns>
 		public static EventWheelResult RegisterMutationRule(IEventMutationRule? rule)
 		{
 			EnsureInitialized();
@@ -178,6 +207,14 @@ public static partial class ReForge
 			return registry!.RegisterMutationRule(rule);
 		}
 
+		/// <summary>
+		/// 尝试获取指定事件定义。
+		/// 当存在池化定义时，会结合 eventModel 上下文进行稳定选择。
+		/// </summary>
+		/// <param name="eventId">事件标识。</param>
+		/// <param name="eventModel">事件模型上下文，可空。</param>
+		/// <param name="definition">输出匹配到的定义。</param>
+		/// <returns>找到定义则返回 true。</returns>
 		public static bool TryGetDefinition(string eventId, EventModel? eventModel, out IEventDefinition? definition)
 		{
 			EnsureInitialized();
@@ -191,6 +228,11 @@ public static partial class ReForge
 			return registry!.TryGetDefinition(eventId, eventModel, out definition);
 		}
 
+		/// <summary>
+		/// 查询 EventWheel 诊断事件。
+		/// </summary>
+		/// <param name="query">可选查询条件，不传则返回默认窗口内诊断。</param>
+		/// <returns>按内部查询规则过滤后的诊断快照。</returns>
 		public static IReadOnlyList<EventWheelDiagnosticEvent> QueryDiagnostics(EventWheelDiagnosticQuery? query = null)
 		{
 			if (!TryGetDiagnostics(out ReForgeFramework.EventWheel.EventWheelDiagnostics? diagnostics))
@@ -201,6 +243,13 @@ public static partial class ReForge
 			return diagnostics!.Query(query);
 		}
 
+		/// <summary>
+		/// 注册选项构建工厂。
+		/// 用于将 IEventOptionDefinition.ActionKey 映射为自定义 EventOption 构造逻辑。
+		/// </summary>
+		/// <param name="actionKey">动作键，区分不同工厂。</param>
+		/// <param name="factory">工厂委托。</param>
+		/// <returns>注册成功返回 true；actionKey 非法返回 false。</returns>
 		public static bool RegisterOptionFactory(string actionKey, Func<EventModel, IEventOptionDefinition, EventOption> factory)
 		{
 			EnsureInitialized();
@@ -217,6 +266,13 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 尝试按 ActionKey 创建运行时事件选项。
+		/// </summary>
+		/// <param name="model">事件模型。</param>
+		/// <param name="definition">选项定义。</param>
+		/// <param name="option">输出创建结果。</param>
+		/// <returns>创建成功返回 true。</returns>
 		internal static bool TryCreateOption(EventModel model, IEventOptionDefinition definition, out EventOption? option)
 		{
 			ArgumentNullException.ThrowIfNull(model);
@@ -245,6 +301,14 @@ public static partial class ReForge
 			return option != null;
 		}
 
+		/// <summary>
+		/// 获取 EventWheel 全量运行时依赖。
+		/// </summary>
+		/// <param name="registry">定义注册表。</param>
+		/// <param name="planner">变更规划器。</param>
+		/// <param name="executor">变更执行器。</param>
+		/// <param name="diagnostics">诊断组件。</param>
+		/// <returns>全部组件可用且未降级时返回 true。</returns>
 		internal static bool TryGetRuntime(
 			out ReForgeFramework.EventWheel.EventDefinitionRegistry? registry,
 			out ReForgeFramework.EventWheel.EventMutationPlanner? planner,
@@ -266,6 +330,10 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 确保 EventWheel 已初始化。
+		/// 未初始化时会触发一次懒初始化。
+		/// </summary>
 		private static void EnsureInitialized()
 		{
 			if (_initialized)
@@ -276,6 +344,12 @@ public static partial class ReForge
 			Initialize();
 		}
 
+		/// <summary>
+		/// 获取定义注册表运行时实例。
+		/// </summary>
+		/// <param name="registry">输出注册表。</param>
+		/// <param name="reason">不可用时的原因说明。</param>
+		/// <returns>可用返回 true；否则返回 false 并输出 reason。</returns>
 		private static bool TryGetRuntime(
 			out ReForgeFramework.EventWheel.EventDefinitionRegistry? registry,
 			out string reason)
@@ -309,6 +383,11 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 获取诊断系统实例。
+		/// </summary>
+		/// <param name="diagnostics">输出诊断实例。</param>
+		/// <returns>可用返回 true。</returns>
 		private static bool TryGetDiagnostics(out ReForgeFramework.EventWheel.EventWheelDiagnostics? diagnostics)
 		{
 			EnsureInitialized();
@@ -319,6 +398,13 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 扫描程序集并自动注册事件定义与变更规则。
+		/// </summary>
+		/// <param name="assembly">待扫描程序集。</param>
+		/// <param name="registry">注册表实例。</param>
+		/// <param name="sourceModId">来源模组标识。</param>
+		/// <returns>扫描与注册统计结果。</returns>
 		private static ScanRegistrationResult ScanAndRegisterAssembly(
 			Assembly assembly,
 			ReForgeFramework.EventWheel.EventDefinitionRegistry registry,
@@ -383,6 +469,9 @@ public static partial class ReForge
 			return new ScanRegistrationResult(registeredDefinitions, registeredMutationRules, Skipped: false);
 		}
 
+		/// <summary>
+		/// 标记程序集已扫描，避免重复扫描。
+		/// </summary>
 		private static bool TryMarkAssemblyScanned(Assembly assembly)
 		{
 			ArgumentNullException.ThrowIfNull(assembly);
@@ -394,6 +483,10 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 安全获取程序集可加载类型集合。
+		/// 遇到 ReflectionTypeLoadException 时会返回可成功解析的子集。
+		/// </summary>
 		private static Type[] GetLoadableTypes(Assembly assembly)
 		{
 			try
@@ -416,6 +509,10 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 判定类型是否可自动注册。
+		/// 仅接受具备无参构造、且实现定义或规则接口的具体类型。
+		/// </summary>
 		private static bool IsAutoRegistrableType(Type type)
 		{
 			if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
@@ -432,12 +529,18 @@ public static partial class ReForge
 			return type.GetConstructor(Type.EmptyTypes) != null;
 		}
 
+		/// <summary>
+		/// 归一化并校验必填键值。
+		/// </summary>
 		private static bool TryNormalizeRequiredKey(string value, out string normalized)
 		{
 			normalized = value?.Trim() ?? string.Empty;
 			return normalized.Length > 0;
 		}
 
+		/// <summary>
+		/// 发布 EventWheel 生命周期事件到事件总线。
+		/// </summary>
 		private static void PublishLifecycle(
 			string eventId,
 			bool success,
@@ -466,11 +569,17 @@ public static partial class ReForge
 			}
 		}
 
+		/// <summary>
+		/// 程序集扫描与注册统计。
+		/// </summary>
 		private readonly record struct ScanRegistrationResult(
 			int RegisteredDefinitions,
 			int RegisteredMutationRules,
 			bool Skipped);
 
+		/// <summary>
+		/// EventWheel 生命周期诊断事件载荷。
+		/// </summary>
 		private readonly record struct EventWheelLifecycleEvent(
 			DateTimeOffset TimestampUtc,
 			bool Success,
@@ -480,6 +589,9 @@ public static partial class ReForge
 			int RegisteredMutationRules,
 			int ScannedAssemblies) : IEventArg;
 
+		/// <summary>
+		/// EventWheel 生命周期事件标识常量。
+		/// </summary>
 		private static class EventWheelLifecycleEventIds
 		{
 			public const string InitializeStarted = "reforge.eventwheel.lifecycle.initialize.started";

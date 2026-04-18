@@ -13,6 +13,10 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// EventModel 反射桥接器。
+/// 负责读取/回写当前选项，并将规划层选项转换为运行时 EventOption。
+/// </summary>
 internal sealed class EventModelBridge
 {
 	private static readonly object AccessorSyncRoot = new();
@@ -38,6 +42,9 @@ internal sealed class EventModelBridge
 		"ApplyOptions"
 	};
 
+	/// <summary>
+	/// 尝试快照当前 EventModel 的选项集合。
+	/// </summary>
 	public bool TrySnapshotCurrentOptions(EventModel model, out IReadOnlyList<EventOption> snapshot, out string message)
 	{
 		ArgumentNullException.ThrowIfNull(model);
@@ -54,6 +61,10 @@ internal sealed class EventModelBridge
 		return false;
 	}
 
+	/// <summary>
+	/// 尝试将选项集合应用回 EventModel。
+	/// 会按“方法 -> 属性 -> 字段”的顺序进行兼容写入。
+	/// </summary>
 	public bool TryApplyCurrentOptions(EventModel model, IReadOnlyList<EventOption> options, out string message)
 	{
 		ArgumentNullException.ThrowIfNull(model);
@@ -118,6 +129,10 @@ internal sealed class EventModelBridge
 		return false;
 	}
 
+	/// <summary>
+	/// 基于规划选项构建运行时选项。
+	/// 优先复用已有选项，其次通过工厂或占位构造生成新选项。
+	/// </summary>
 	public IReadOnlyList<EventOption> BuildRuntimeOptions(
 		EventModel model,
 		IReadOnlyList<EventMutationPlannedOption> plannedOptions,

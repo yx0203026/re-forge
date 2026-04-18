@@ -8,15 +8,25 @@ using ReForgeFramework.EventBus;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// EventWheel 诊断事件总线标识。
+/// </summary>
 internal static class EventWheelDiagnosticsEventIds
 {
 	public const string Recorded = "reforge.eventwheel.diagnostic.recorded";
 }
 
+/// <summary>
+/// 诊断事件发布载荷。
+/// </summary>
 internal readonly record struct EventWheelDiagnosticRecordedEvent(
 	EventWheelDiagnosticEvent Diagnostic
 ) : IEventArg;
 
+/// <summary>
+/// EventWheel 诊断中心。
+/// 支持缓冲、查询、监听分发、Godot 日志输出与事件总线广播。
+/// </summary>
 internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 {
 	private static readonly EventWheelStage[] StageOrder =
@@ -34,6 +44,9 @@ internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 	private readonly bool _emitGodotLog;
 	private readonly bool _publishToEventBus;
 
+	/// <summary>
+	/// 创建诊断中心。
+	/// </summary>
 	public EventWheelDiagnostics(
 		int maxDiagnostics = 512,
 		bool emitGodotLog = true,
@@ -44,6 +57,9 @@ internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 		_publishToEventBus = publishToEventBus;
 	}
 
+	/// <summary>
+	/// 记录一条诊断事件。
+	/// </summary>
 	public void Track(EventWheelDiagnosticEvent diagnosticEvent)
 	{
 		EventWheelDiagnosticEvent normalized = NormalizeDiagnostic(diagnosticEvent);
@@ -95,6 +111,9 @@ internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 		}
 	}
 
+	/// <summary>
+	/// 按参数构建并记录诊断事件。
+	/// </summary>
 	public void Track(
 		EventWheelStage stage,
 		EventWheelSeverity severity,
@@ -115,16 +134,25 @@ internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 			Context: context));
 	}
 
+	/// <summary>
+	/// 查询诊断明细。
+	/// </summary>
 	public IReadOnlyList<EventWheelDiagnosticEvent> Query(EventWheelDiagnosticQuery? query = null)
 	{
 		return BuildSnapshot(query).Events;
 	}
 
+	/// <summary>
+	/// 获取诊断汇总。
+	/// </summary>
 	public EventWheelDiagnosticsSummary GetSummary(EventWheelDiagnosticQuery? query = null)
 	{
 		return BuildSnapshot(query).Summary;
 	}
 
+	/// <summary>
+	/// 构建诊断快照（明细与汇总）。
+	/// </summary>
 	public EventWheelDiagnosticsSnapshot BuildSnapshot(EventWheelDiagnosticQuery? query = null)
 	{
 		query ??= new EventWheelDiagnosticQuery();
@@ -219,6 +247,9 @@ internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 			Summary: BuildSummary(totalCount, infoCount, warningCount, errorCount, stageAccumulators));
 	}
 
+	/// <summary>
+	/// 注册诊断监听器。
+	/// </summary>
 	public bool RegisterListener(string busId, Action<EventWheelDiagnosticEvent> listener)
 	{
 		ArgumentNullException.ThrowIfNull(listener);
@@ -235,6 +266,9 @@ internal sealed class EventWheelDiagnostics : IEventWheelDiagnosticsApi
 		}
 	}
 
+	/// <summary>
+	/// 注销诊断监听器。
+	/// </summary>
 	public int UnregisterListener(string busId)
 	{
 		if (!TryNormalizeRequiredKey(busId, out string normalizedBusId))

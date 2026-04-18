@@ -6,6 +6,9 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// 事件变更规划产物。
+/// </summary>
 internal sealed record EventMutationPlan(
 	string EventId,
 	EventKind Kind,
@@ -14,6 +17,9 @@ internal sealed record EventMutationPlan(
 	IReadOnlyList<EventMutationWarning> Warnings
 );
 
+/// <summary>
+/// 单条规则执行步骤记录。
+/// </summary>
 internal sealed record EventMutationStep(
 	int Sequence,
 	string RuleId,
@@ -28,6 +34,9 @@ internal sealed record EventMutationStep(
 	string Message
 );
 
+/// <summary>
+/// 变更规划或执行过程中的告警项。
+/// </summary>
 internal sealed record EventMutationWarning(
 	EventWheelSeverity Severity,
 	string Code,
@@ -38,8 +47,15 @@ internal sealed record EventMutationWarning(
 	string? TargetOptionKey = null
 );
 
+/// <summary>
+/// 规划阶段选项模型。
+/// 实现 IEventOptionDefinition 以复用既有处理链路。
+/// </summary>
 internal sealed class EventMutationPlannedOption : IEventOptionDefinition
 {
+	/// <summary>
+	/// 创建规划选项实例。
+	/// </summary>
 	public EventMutationPlannedOption(
 		string optionKey,
 		string? actionKey,
@@ -84,6 +100,9 @@ internal sealed class EventMutationPlannedOption : IEventOptionDefinition
 
 	public IReadOnlyList<string> TagKeys { get; }
 
+	/// <summary>
+	/// 创建仅变更锁定状态的新实例。
+	/// </summary>
 	public EventMutationPlannedOption WithLocked(bool isLocked)
 	{
 		if (isLocked == IsLocked)
@@ -105,6 +124,13 @@ internal sealed class EventMutationPlannedOption : IEventOptionDefinition
 		);
 	}
 
+	/// <summary>
+	/// 从 IEventOptionDefinition 构建规划选项。
+	/// </summary>
+	/// <param name="option">源选项定义。</param>
+	/// <param name="plannedOption">输出规划选项。</param>
+	/// <param name="message">失败原因。</param>
+	/// <returns>构建成功返回 true。</returns>
 	public static bool TryCreateFromDefinition(
 		IEventOptionDefinition? option,
 		out EventMutationPlannedOption? plannedOption,

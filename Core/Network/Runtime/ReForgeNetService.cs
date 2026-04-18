@@ -10,13 +10,17 @@ internal sealed class ReForgeNetService : IReForgeNetService, IDisposable
 	private readonly ReForgeNetMessageRegistry _registry = new();
 	private readonly ReForgeNetMessageBus _messageBus;
 	private IReForgeNetTransport _transport;
+	private ReForgeNetProtocolInteropMode _interopMode;
 	private bool _disposed;
 
-	public ReForgeNetService(IReForgeNetTransport transport)
+	public ReForgeNetService(
+		IReForgeNetTransport transport,
+		ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid)
 	{
 		ArgumentNullException.ThrowIfNull(transport);
 		_messageBus = new ReForgeNetMessageBus(_registry);
 		_transport = transport;
+		_interopMode = interopMode;
 		_transport.PacketReceived += OnPacketReceived;
 	}
 
@@ -25,6 +29,8 @@ internal sealed class ReForgeNetService : IReForgeNetService, IDisposable
 	public bool IsConnected => _transport.IsConnected;
 
 	internal IReForgeNetTransport Transport => _transport;
+
+	internal ReForgeNetProtocolInteropMode InteropMode => _interopMode;
 
 	public void RegisterMessage<T>(byte id) where T : IReForgeNetMessage, new()
 	{
@@ -55,7 +61,8 @@ internal sealed class ReForgeNetService : IReForgeNetService, IDisposable
 			return;
 		}
 
-		byte[] bytes = _messageBus.SerializeMessage(LocalPeerId, message, out int length);
+		bool includeSenderHeader = _interopMode == ReForgeNetProtocolInteropMode.ReForgeOnly;
+		byte[] bytes = _messageBus.SerializeMessage(LocalPeerId, message, includeSenderHeader, out int length);
 		_transport.SendToAll(bytes, length, message.Mode, message.Mode.ToChannelId());
 	}
 
@@ -70,8 +77,15 @@ internal sealed class ReForgeNetService : IReForgeNetService, IDisposable
 			return;
 		}
 
-		byte[] bytes = _messageBus.SerializeMessage(LocalPeerId, message, out int length);
+		bool includeSenderHeader = _interopMode == ReForgeNetProtocolInteropMode.ReForgeOnly;
+		byte[] bytes = _messageBus.SerializeMessage(LocalPeerId, message, includeSenderHeader, out int length);
 		_transport.SendToPeer(peerId, bytes, length, message.Mode, message.Mode.ToChannelId());
+	}
+
+	public void SetProtocolInteropMode(ReForgeNetProtocolInteropMode interopMode)
+	{
+		ThrowIfDisposed();
+		_interopMode = interopMode;
 	}
 
 	public void Update()
@@ -99,7 +113,7 @@ internal sealed class ReForgeNetService : IReForgeNetService, IDisposable
 
 	private void OnPacketReceived(ulong senderId, byte[] packetBytes, ReForgeNetTransferMode mode, int channel)
 	{
-		if (!_messageBus.TryDeserializeMessage(packetBytes, out IReForgeNetMessage? message, out ulong overrideSenderId))
+		if (!_messageBus.TryDeserializeMessage(packetBytes, _interopMode, out IReForgeNetMessage? message, out ulong overrideSenderId))
 		{
 			GD.PrintErr($"[ReForge.Network] Failed to parse incoming packet, size={packetBytes.Length}, mode={mode}, channel={channel}.");
 			return;

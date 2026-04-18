@@ -5,6 +5,9 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// 事件定义冲突策略。
+/// </summary>
 internal enum EventDefinitionConflictPolicy
 {
 	ReplaceExisting = 0,
@@ -13,6 +16,9 @@ internal enum EventDefinitionConflictPolicy
 	RejectIncoming = 3
 }
 
+/// <summary>
+/// 事件变更规则冲突策略。
+/// </summary>
 internal enum EventMutationConflictPolicy
 {
 	ReplaceExisting = 0,
@@ -21,6 +27,9 @@ internal enum EventMutationConflictPolicy
 	RejectIncoming = 3
 }
 
+/// <summary>
+/// 冲突解析结果。
+/// </summary>
 internal sealed record EventDefinitionConflictResolution(
 	bool AcceptIncoming,
 	bool IsConflict,
@@ -29,8 +38,19 @@ internal sealed record EventDefinitionConflictResolution(
 	string Message
 );
 
+/// <summary>
+/// 事件定义与规则冲突解析器。
+/// 用于在同一 eventId 或 ruleId 重复注册时给出确定性处理结果。
+/// </summary>
 internal sealed class EventDefinitionConflictResolver
 {
+	/// <summary>
+	/// 解析事件定义冲突。
+	/// </summary>
+	/// <param name="existing">已存在定义。</param>
+	/// <param name="incoming">新注册定义。</param>
+	/// <param name="policy">冲突策略。</param>
+	/// <returns>冲突决议结果。</returns>
 	public EventDefinitionConflictResolution ResolveDefinition(
 		IEventDefinition existing,
 		IEventDefinition incoming,
@@ -83,6 +103,13 @@ internal sealed class EventDefinitionConflictResolver
 		);
 	}
 
+	/// <summary>
+	/// 解析事件变更规则冲突。
+	/// </summary>
+	/// <param name="existing">已存在规则。</param>
+	/// <param name="incoming">新注册规则。</param>
+	/// <param name="policy">冲突策略。</param>
+	/// <returns>冲突决议结果。</returns>
 	public EventDefinitionConflictResolution ResolveMutationRule(
 		IEventMutationRule existing,
 		IEventMutationRule incoming,

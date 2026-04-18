@@ -7,8 +7,15 @@ using System.Text;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// EventWheel 池化选择工具。
+/// 提供稳定种子生成与加权索引选择，保证跨端一致性。
+/// </summary>
 internal static class EventWheelPoolSelection
 {
+	/// <summary>
+	/// 按权重从集合中选择索引。
+	/// </summary>
 	public static int SelectWeightedIndex<T>(IReadOnlyList<T> items, string seed, Func<T, int> weightSelector)
 	{
 		if (items == null || items.Count == 0)
@@ -55,6 +62,9 @@ internal static class EventWheelPoolSelection
 		return items.Count - 1;
 	}
 
+	/// <summary>
+	/// 使用分隔符拼接种子片段。
+	/// </summary>
 	public static string BuildSeed(params string?[] parts)
 	{
 		if (parts == null || parts.Length == 0)

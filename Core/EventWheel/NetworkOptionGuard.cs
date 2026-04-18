@@ -7,11 +7,17 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// 联机选项守卫结果。
+/// </summary>
 internal sealed record NetworkOptionGuardResult(
 	IReadOnlyList<EventMutationPlannedOption> Options,
 	NetworkOptionGuardReport Report
 );
 
+/// <summary>
+/// 联机选项守卫报告。
+/// </summary>
 internal sealed record NetworkOptionGuardReport(
 	bool IsMultiplayer,
 	int MaxAllowedCount,
@@ -23,6 +29,10 @@ internal sealed record NetworkOptionGuardReport(
 	IReadOnlyList<EventMutationWarning> Warnings
 );
 
+/// <summary>
+/// 联机场景事件选项归一化守卫。
+/// 负责稳定排序、去重、裁剪与协议风险告警，避免跨端选项索引漂移。
+/// </summary>
 internal sealed class NetworkOptionGuard
 {
 	private const int DefaultMultiplayerOptionCount = 16;
@@ -38,6 +48,10 @@ internal sealed class NetworkOptionGuard
 	private readonly int _maxMultiplayerOptionCount;
 	private readonly string _maxOptionCountSource;
 
+	/// <summary>
+	/// 使用配置源初始化守卫。
+	/// 优先级：环境变量 > ProjectSettings > 默认值。
+	/// </summary>
 	public NetworkOptionGuard()
 	{
 		int configuredValue = ResolveConfiguredMaxMultiplayerOptionCount(out string source);
@@ -47,6 +61,9 @@ internal sealed class NetworkOptionGuard
 		LogConfigurationOnce(_maxMultiplayerOptionCount, _maxOptionCountSource);
 	}
 
+	/// <summary>
+	/// 使用指定上限初始化守卫。
+	/// </summary>
 	public NetworkOptionGuard(int maxMultiplayerOptionCount = DefaultMultiplayerOptionCount)
 	{
 		_maxMultiplayerOptionCount = NormalizeMaxMultiplayerOptionCount(maxMultiplayerOptionCount, out int normalizedFrom);
@@ -55,6 +72,14 @@ internal sealed class NetworkOptionGuard
 		LogConfigurationOnce(_maxMultiplayerOptionCount, _maxOptionCountSource);
 	}
 
+	/// <summary>
+	/// 对规划选项执行联机归一化。
+	/// </summary>
+	/// <param name="eventId">事件标识。</param>
+	/// <param name="options">输入选项集合。</param>
+	/// <param name="isMultiplayer">是否联机。</param>
+	/// <param name="sourceModId">来源模组标识。</param>
+	/// <returns>归一化后的选项与报告。</returns>
 	public NetworkOptionGuardResult NormalizeForNetwork(
 		string eventId,
 		IReadOnlyList<EventMutationPlannedOption>? options,

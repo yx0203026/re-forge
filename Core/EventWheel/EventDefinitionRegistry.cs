@@ -7,6 +7,10 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// EventWheel 事件定义与变更规则注册中心。
+/// 管理定义冲突、规则冲突、池化定义选择、以及注册与诊断监听分发。
+/// </summary>
 internal sealed class EventDefinitionRegistry
 {
 	private readonly object _syncRoot = new();
@@ -21,6 +25,14 @@ internal sealed class EventDefinitionRegistry
 	private readonly Dictionary<string, Dictionary<string, IEventMutationRule>> _rulesByEventId = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, Action<EventRegistrationResult>> _registrationListeners = new(StringComparer.Ordinal);
 
+	/// <summary>
+	/// 创建事件注册中心。
+	/// </summary>
+	/// <param name="conflictResolver">可选冲突解析器；为空时使用默认实现。</param>
+	/// <param name="definitionConflictPolicy">定义冲突策略。</param>
+	/// <param name="mutationConflictPolicy">规则冲突策略。</param>
+	/// <param name="maxDiagnostics">内部诊断容量上限。</param>
+	/// <param name="diagnostics">可选外部诊断实例。</param>
 	public EventDefinitionRegistry(
 		EventDefinitionConflictResolver? conflictResolver = null,
 		EventDefinitionConflictPolicy definitionConflictPolicy = EventDefinitionConflictPolicy.ReplaceExisting,
@@ -34,11 +46,17 @@ internal sealed class EventDefinitionRegistry
 		_diagnostics = diagnostics ?? new EventWheelDiagnostics(maxDiagnostics: maxDiagnostics);
 	}
 
+	/// <summary>
+	/// 注册诊断监听器。
+	/// </summary>
 	public bool RegisterDiagnosticListener(string busId, Action<EventWheelDiagnosticEvent> listener)
 	{
 		return _diagnostics.RegisterListener(busId, listener);
 	}
 
+	/// <summary>
+	/// 注册定义注册结果监听器。
+	/// </summary>
 	public bool RegisterRegistrationListener(string busId, Action<EventRegistrationResult> listener)
 	{
 		if (!TryNormalizeRequiredKey(busId, out string normalizedBusId))
@@ -55,11 +73,17 @@ internal sealed class EventDefinitionRegistry
 		}
 	}
 
+	/// <summary>
+	/// 注销诊断监听器。
+	/// </summary>
 	public int UnregisterDiagnosticListener(string busId)
 	{
 		return _diagnostics.UnregisterListener(busId);
 	}
 
+	/// <summary>
+	/// 注销定义注册结果监听器。
+	/// </summary>
 	public int UnregisterRegistrationListener(string busId)
 	{
 		if (!TryNormalizeRequiredKey(busId, out string normalizedBusId))
@@ -73,6 +97,10 @@ internal sealed class EventDefinitionRegistry
 		}
 	}
 
+	/// <summary>
+	/// 注册事件定义。
+	/// 支持固定定义与池化定义，并在冲突时按策略处理。
+	/// </summary>
 	public EventRegistrationResult RegisterDefinition(
 		IEventDefinition? definition,
 		EventDefinitionConflictPolicy? conflictPolicy = null)
@@ -176,6 +204,9 @@ internal sealed class EventDefinitionRegistry
 		return result;
 	}
 
+	/// <summary>
+	/// 注册事件变更规则。
+	/// </summary>
 	public EventWheelResult RegisterMutationRule(
 		IEventMutationRule? rule,
 		EventMutationConflictPolicy? conflictPolicy = null)
@@ -272,11 +303,18 @@ internal sealed class EventDefinitionRegistry
 		return result;
 	}
 
+	/// <summary>
+	/// 按 eventId 查询定义（不带模型上下文）。
+	/// </summary>
 	public bool TryGetDefinition(string eventId, out IEventDefinition? definition)
 	{
 		return TryGetDefinition(eventId, eventModel: null, out definition);
 	}
 
+	/// <summary>
+	/// 按 eventId 与模型上下文查询定义。
+	/// 当存在池化定义时会执行稳定加权选择。
+	/// </summary>
 	public bool TryGetDefinition(string eventId, EventModel? eventModel, out IEventDefinition? definition)
 	{
 		definition = null;
@@ -301,6 +339,9 @@ internal sealed class EventDefinitionRegistry
 		}
 	}
 
+	/// <summary>
+	/// 获取当前所有事件定义快照（包含固定定义与池化定义）。
+	/// </summary>
 	public IReadOnlyList<IEventDefinition> GetDefinitionSnapshot()
 	{
 		lock (_syncRoot)
@@ -351,6 +392,10 @@ internal sealed class EventDefinitionRegistry
 		}
 	}
 
+	/// <summary>
+	/// 获取指定事件的变更规则快照。
+	/// 返回结果按稳定比较器排序，确保跨端一致。
+	/// </summary>
 	public IReadOnlyList<IEventMutationRule> GetMutationRules(string eventId)
 	{
 		if (!TryNormalizeRequiredKey(eventId, out string normalizedEventId))
@@ -395,6 +440,9 @@ internal sealed class EventDefinitionRegistry
 		}
 	}
 
+	/// <summary>
+	/// 获取指定事件的定义与规则集合。
+	/// </summary>
 	public bool TryGetEventData(string eventId, out IEventDefinition? definition, out IReadOnlyList<IEventMutationRule> rules)
 	{
 		rules = Array.Empty<IEventMutationRule>();
@@ -407,16 +455,25 @@ internal sealed class EventDefinitionRegistry
 		return true;
 	}
 
+	/// <summary>
+	/// 查询诊断事件。
+	/// </summary>
 	public IReadOnlyList<EventWheelDiagnosticEvent> QueryDiagnostics(EventWheelDiagnosticQuery? query = null)
 	{
 		return _diagnostics.Query(query);
 	}
 
+	/// <summary>
+	/// 获取诊断汇总信息。
+	/// </summary>
 	public EventWheelDiagnosticsSummary GetDiagnosticsSummary(EventWheelDiagnosticQuery? query = null)
 	{
 		return _diagnostics.GetSummary(query);
 	}
 
+	/// <summary>
+	/// 构建诊断快照（事件明细 + 汇总）。
+	/// </summary>
 	public EventWheelDiagnosticsSnapshot GetDiagnosticsSnapshot(EventWheelDiagnosticQuery? query = null)
 	{
 		return _diagnostics.BuildSnapshot(query);

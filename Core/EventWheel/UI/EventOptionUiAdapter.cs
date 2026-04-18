@@ -21,6 +21,9 @@ public static class EventOptionUiAdapter
 }
 
 [HarmonyPatch(typeof(NEventLayout), "AddOptions")]
+/// <summary>
+/// 普通事件布局补丁：在 AddOptions 后刷新分页布局。
+/// </summary>
 internal static class EventOptionUiLayoutPatches
 {
 	[HarmonyPostfix]
@@ -31,6 +34,9 @@ internal static class EventOptionUiLayoutPatches
 }
 
 [HarmonyPatch(typeof(NAncientEventLayout), "OnSetupComplete")]
+/// <summary>
+/// 远古事件初始化完成补丁：建立分页条。
+/// </summary>
 internal static class EventOptionUiAncientSetupPatches
 {
 	[HarmonyPostfix]
@@ -41,6 +47,9 @@ internal static class EventOptionUiAncientSetupPatches
 }
 
 [HarmonyPatch(typeof(NAncientEventLayout), "SetDialogueLineAndAnimate")]
+/// <summary>
+/// 远古事件对话更新补丁：保证动态刷新后分页仍正确。
+/// </summary>
 internal static class EventOptionUiAncientDialoguePatches
 {
 	[HarmonyPostfix]

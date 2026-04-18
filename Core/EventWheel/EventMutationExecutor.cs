@@ -9,6 +9,9 @@ using ReForgeFramework.Api.Events;
 
 namespace ReForgeFramework.EventWheel;
 
+/// <summary>
+/// 事件变更执行结果。
+/// </summary>
 internal sealed record EventMutationExecutionResult(
 	EventWheelResult Result,
 	IReadOnlyList<EventMutationWarning> Warnings,
@@ -16,12 +19,19 @@ internal sealed record EventMutationExecutionResult(
 	int AppliedOptionCount
 );
 
+/// <summary>
+/// 事件变更执行器。
+/// 负责将规划结果转为运行时选项并回写到 EventModel，同时提供回滚与诊断输出。
+/// </summary>
 internal sealed class EventMutationExecutor
 {
 	private readonly EventModelBridge _bridge;
 	private readonly NetworkOptionGuard _networkGuard;
 	private readonly EventWheelDiagnostics? _diagnostics;
 
+	/// <summary>
+	/// 创建执行器实例。
+	/// </summary>
 	public EventMutationExecutor(
 		EventModelBridge? bridge = null,
 		NetworkOptionGuard? networkGuard = null,
@@ -32,6 +42,14 @@ internal sealed class EventMutationExecutor
 		_diagnostics = diagnostics;
 	}
 
+	/// <summary>
+	/// 执行事件选项变更计划。
+	/// </summary>
+	/// <param name="model">目标事件模型。</param>
+	/// <param name="plan">变更计划。</param>
+	/// <param name="isMultiplayer">是否处于联机场景。</param>
+	/// <param name="sourceModId">来源模组标识。</param>
+	/// <returns>执行结果，包含警告、是否回滚以及最终应用数量。</returns>
 	public EventMutationExecutionResult Execute(
 		EventModel? model,
 		EventMutationPlan? plan,
