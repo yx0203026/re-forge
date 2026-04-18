@@ -88,6 +88,19 @@ public abstract class CombatTimelyEventBase
 		}
 	}
 
+	internal bool TryDispatchNetworkTrigger(in CombatTimelyEventContext context)
+	{
+		if (context.Phase != CombatTimelyEventPhase.Trigger)
+		{
+			return false;
+		}
+
+		// 联机同步消息由权威端先完成 CanTrigger 判定，客户端按同步结果强制重放。
+		MarkTrigger();
+		OnTriggered(context);
+		return true;
+	}
+
 	protected virtual void OnEnter(in CombatTimelyEventContext context)
 	{
 	}

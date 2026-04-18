@@ -256,7 +256,16 @@ public sealed class DebuffSelectionPanelBuilder
 			return selected;
 		}
 
-		if (!ReForge.Network.IsConnected || !target.IsPlayer || target.Player == null)
+		bool isPlayerTarget = target.IsPlayer && target.Player != null;
+		bool isMultiplayerPlayerTarget = isPlayerTarget && target.Player!.RunState.Players.Count > 1;
+		if (isMultiplayerPlayerTarget && !ReForge.Network.IsConnected)
+		{
+			// 多人局一旦断线，禁止回退为本地直接施加，避免主客状态分叉。
+			GD.PrintErr("[ReForge.UI.DebuffSelection] Apply skipped: multiplayer target but network disconnected after selection.");
+			return selected;
+		}
+
+		if (!ReForge.Network.IsConnected || !isPlayerTarget)
 		{
 			await ApplySelectionToTargetAsync(selected, target, applier, cardSource, silent);
 			return selected;

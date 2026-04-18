@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Emit;
 using System.Threading.Tasks;
 using Godot;
 using HarmonyLib;
@@ -37,6 +38,7 @@ public static partial class ReForge
 
 		private static readonly object SyncRoot = new();
 		private static readonly Dictionary<ulong, int> HandLimitOverrides = new();
+		private static readonly System.Threading.AsyncLocal<int?> AddHandLimitContext = new();
 		private static bool _initialized;
 
 		public static bool IsInitialized => _initialized;
@@ -66,6 +68,12 @@ public static partial class ReForge
 		{
 			ArgumentNullException.ThrowIfNull(player);
 			return player.Creature;
+		}
+
+		public static CharacterModel GetCharacter(MegaCrit.Sts2.Core.Entities.Players.Player player)
+		{
+			ArgumentNullException.ThrowIfNull(player);
+			return player.Character;
 		}
 
 		public static IReadOnlyList<RelicModel> GetRelics(MegaCrit.Sts2.Core.Entities.Players.Player player)
@@ -309,6 +317,30 @@ public static partial class ReForge
 			return DefaultHandLimit;
 		}
 
+		private static int ResolveHandLimitOrDefault(MegaCrit.Sts2.Core.Entities.Players.Player? player)
+		{
+			if (player == null)
+			{
+				return DefaultHandLimit;
+			}
+
+			lock (SyncRoot)
+			{
+				return ResolveHandLimit(player);
+			}
+		}
+
+		private static int GetCurrentAddHandLimitOrDefault()
+		{
+			int? contextLimit = AddHandLimitContext.Value;
+			if (!contextLimit.HasValue)
+			{
+				return DefaultHandLimit;
+			}
+
+			return Math.Max(MinHandLimit, contextLimit.Value);
+		}
+
 		private static bool CheckIfDrawIsPossibleAndShowThoughtBubbleIfNot(MegaCrit.Sts2.Core.Entities.Players.Player player, int handLimit)
 		{
 			if (PileType.Draw.GetPile(player).Cards.Count + PileType.Discard.GetPile(player).Cards.Count == 0)
@@ -400,6 +432,68 @@ public static partial class ReForge
 			}
 
 			return result;
+		}
+
+		[HarmonyPatch(typeof(CardPileCmd), nameof(CardPileCmd.Add), new[] { typeof(IEnumerable<CardModel>), typeof(CardPile), typeof(CardPilePosition), typeof(AbstractModel), typeof(bool) })]
+		private static class CardPileCmdAddHandLimitPatch
+		{
+			[HarmonyPrefix]
+			private static void Prefix(ref IEnumerable<CardModel> cards, CardPile newPile, out int? __state)
+			{
+				__state = AddHandLimitContext.Value;
+
+				if (newPile?.Type != PileType.Hand)
+				{
+					AddHandLimitContext.Value = null;
+					return;
+				}
+
+				if (cards is not IList<CardModel>)
+				{
+					cards = cards.ToList();
+				}
+
+				CardModel? first = cards.FirstOrDefault();
+				MegaCrit.Sts2.Core.Entities.Players.Player? owner = first?.Owner;
+				AddHandLimitContext.Value = ResolveHandLimitOrDefault(owner);
+			}
+
+			[HarmonyTranspiler]
+			private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+			{
+				var limitGetter = AccessTools.Method(typeof(Player), nameof(GetCurrentAddHandLimitOrDefault));
+				if (limitGetter == null)
+				{
+					foreach (CodeInstruction instruction in instructions)
+					{
+						yield return instruction;
+					}
+					yield break;
+				}
+
+				foreach (CodeInstruction instruction in instructions)
+				{
+					bool isTenConstant = instruction.opcode == OpCodes.Ldc_I4_S && instruction.operand is sbyte shortConst && shortConst == 10;
+					isTenConstant = isTenConstant || instruction.opcode == OpCodes.Ldc_I4 && instruction.operand is int intConst && intConst == 10;
+
+					if (!isTenConstant)
+					{
+						yield return instruction;
+						continue;
+					}
+
+					instruction.opcode = OpCodes.Call;
+					instruction.operand = limitGetter;
+					yield return instruction;
+				}
+			}
+
+			[HarmonyFinalizer]
+			private static Exception? Finalizer(Exception? __exception, int? __state)
+			{
+				AddHandLimitContext.Value = __state;
+				return __exception;
+			}
 		}
 
 		[HarmonyPatch(typeof(CardPileCmd), nameof(CardPileCmd.Draw), new[] { typeof(PlayerChoiceContext), typeof(decimal), typeof(MegaCrit.Sts2.Core.Entities.Players.Player), typeof(bool) })]

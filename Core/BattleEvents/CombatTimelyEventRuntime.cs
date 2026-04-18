@@ -82,6 +82,15 @@ internal sealed class CombatTimelyEventRuntime
 			return false;
 		}
 
+		// 框架级联机同步策略：
+		// 1) 本地 Trigger 仅允许权威端执行并广播；
+		// 2) 非权威端只能通过网络同步消息触发事件。
+		if (broadcastIfAuthority && ReForge.Network.IsConnected && !ReForge.BattleEvents.IsAuthority())
+		{
+			GD.Print($"[ReForge.BattleEvents] local trigger ignored on non-authority peer. eventId='{@event.EventId}'.");
+			return false;
+		}
+
 		CombatTimelyEventContext context = CreateContext(runState, combatState, CombatTimelyEventPhase.Trigger);
 		bool triggered;
 		try
@@ -129,9 +138,32 @@ internal sealed class CombatTimelyEventRuntime
 			return;
 		}
 
+		if (!IsInCombat)
+		{
+			GD.Print($"[ReForge.BattleEvents] network trigger ignored (not in combat). sender={senderId}, eventId='{message.EventId}'.");
+			return;
+		}
+
+		if (!_registry.TryGet(message.EventId, out CombatTimelyEventBase @event))
+		{
+			GD.PrintErr($"[ReForge.BattleEvents] network trigger ignored. event not found. sender={senderId}, eventId='{message.EventId}'.");
+			return;
+		}
+
 		CombatState? combatState = CombatManager.Instance.DebugOnlyGetState();
 		IRunState? runState = combatState?.RunState;
-		bool triggered = TryTrigger(message.EventId, runState, combatState, broadcastIfAuthority: false);
+		CombatTimelyEventContext context = CreateContext(runState, combatState, CombatTimelyEventPhase.Trigger);
+		bool triggered;
+		try
+		{
+			triggered = @event.TryDispatchNetworkTrigger(context);
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.BattleEvents] network trigger failed. sender={senderId}, eventId='{@event.EventId}'. {ex}");
+			return;
+		}
+
 		if (!triggered)
 		{
 			GD.Print($"[ReForge.BattleEvents] network trigger ignored. sender={senderId}, eventId='{message.EventId}'.");

@@ -21,7 +21,9 @@ internal sealed class ReForgeCombatTimelyEventSyncMessage : INetMessage
 
 	public bool ShouldBroadcast => false;
 
-	public NetTransferMode Mode => NetTransferMode.Unreliable;
+	// 及时事件会携带关键战斗状态变更（刷怪/清怪/奖励等），
+	// 必须使用可靠传输，避免丢包或乱序导致主客状态分叉。
+	public NetTransferMode Mode => NetTransferMode.Reliable;
 
 	public LogLevel LogLevel => LogLevel.VeryDebug;
 
