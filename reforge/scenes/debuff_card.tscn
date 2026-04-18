@@ -1,0 +1,28 @@
+[gd_scene load_steps=2 format=3 uid="uid://d26ow5yif2t5t"]
+
+[ext_resource type="Texture2D" uid="uid://bmqhnuh88j44f" path="res://reforge/image/card_bg/ui_atlas_0.png" id="1_36xl7"]
+
+[node name="DebuffCard" type="Control"]
+layout_mode = 3
+anchor_right = 0.512
+anchor_bottom = 1.2950001
+offset_right = 12.175964
+offset_bottom = 10.839966
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CardBg" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 0.998
+anchor_bottom = 0.99500006
+offset_right = 0.20397949
+offset_bottom = 0.24993896
+texture = ExtResource("1_36xl7")
+
+[node name="RichTextLabel" type="RichTextLabel" parent="."]
+layout_mode = 0
+offset_left = 276.0
+offset_top = 22.0
+offset_right = 316.0
+offset_bottom = 62.0

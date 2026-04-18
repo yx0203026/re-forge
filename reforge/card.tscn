@@ -1,0 +1,560 @@
+[gd_scene load_steps=7 format=3 uid="uid://bmqcsn0bihd3y"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_7ivyc"]
+resource_local_to_scene = true
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_bc7ph"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_1rlg0"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}, {
+"duration": 1.0,
+"texture": null
+}],
+"loop": true,
+"name": &"default",
+"speed": 10.0
+}]
+
+[sub_resource type="FontVariation" id="FontVariation_2eadq"]
+spacing_glyph = 1
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ots2x"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_sh66y"]
+
+[node name="Card" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+metadata/_edit_group_ = true
+metadata/_edit_lock_ = true
+
+[node name="CardContainer" type="Control" parent="."]
+unique_name_in_owner = true
+anchors_preset = 0
+mouse_filter = 2
+
+[node name="Shadow" type="TextureRect" parent="CardContainer"]
+modulate = Color(0, 0, 0, 0.25098)
+layout_mode = 0
+offset_left = -138.0
+offset_top = -199.0
+offset_right = 162.0
+offset_bottom = 223.0
+pivot_offset = Vector2(150, 211)
+mouse_filter = 2
+expand_mode = 4
+stretch_mode = 5
+
+[node name="Highlight" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+modulate = Color(0, 0.957, 0.988, 0.98)
+material = SubResource("ShaderMaterial_7ivyc")
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -381.0
+offset_top = -475.0
+offset_right = 378.0
+offset_bottom = 476.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(150, 211)
+mouse_filter = 2
+expand_mode = 4
+stretch_mode = 5
+
+[node name="PortraitCanvasGroup" type="CanvasGroup" parent="CardContainer"]
+unique_name_in_owner = true
+fit_margin = 1.0
+clear_margin = 1.0
+
+[node name="Portrait" type="TextureRect" parent="CardContainer/PortraitCanvasGroup"]
+unique_name_in_owner = true
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -125.0
+offset_top = -168.0
+offset_right = 125.0
+offset_bottom = 22.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(125, 95)
+mouse_filter = 2
+expand_mode = 2
+stretch_mode = 5
+
+[node name="AncientPortrait" type="TextureRect" parent="CardContainer/PortraitCanvasGroup"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -153.0
+offset_top = -215.0
+offset_right = 445.0
+offset_bottom = 627.0
+grow_horizontal = 2
+grow_vertical = 2
+scale = Vector2(0.5, 0.5)
+mouse_filter = 2
+expand_mode = 1
+
+[node name="AncientHighlight" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.752941)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -156.0
+offset_top = -220.0
+offset_right = 154.0
+offset_bottom = 217.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(150, 211)
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="AncientBorder" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -154.0
+offset_top = -223.0
+offset_right = 152.0
+offset_bottom = 217.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(150, 211)
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="AncientTextBg" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -132.0
+offset_top = -20.0
+offset_right = 132.0
+offset_bottom = 183.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Lock" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+visible = false
+material = SubResource("ShaderMaterial_bc7ph")
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -125.0
+offset_top = -175.0
+offset_right = 125.0
+offset_bottom = 15.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(125, 95)
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Frame" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -211.0
+offset_right = 150.0
+offset_bottom = 211.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(150, 211)
+mouse_filter = 2
+expand_mode = 4
+stretch_mode = 5
+
+[node name="DescriptionLabel" type="RichTextLabel" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = -122.0
+offset_top = 37.0
+offset_right = 121.0
+offset_bottom = 173.0
+mouse_filter = 2
+theme_override_colors/default_color = Color(1, 0.964706, 0.886275, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.25098)
+theme_override_constants/line_separation = -3
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/normal_font_size = 21
+theme_override_font_sizes/bold_font_size = 21
+theme_override_font_sizes/bold_italics_font_size = 21
+theme_override_font_sizes/italics_font_size = 21
+theme_override_font_sizes/mono_font_size = 21
+bbcode_enabled = true
+text = "[center]If you can read this, there is a bug.[/center]"
+scroll_active = false
+vertical_alignment = 1
+
+[node name="PortraitBorder" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -137.5
+offset_top = -164.0
+offset_right = 137.5
+offset_bottom = 46.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(137, 105)
+mouse_filter = 2
+expand_mode = 2
+stretch_mode = 5
+
+[node name="OverlayContainer" type="Control" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TitleBanner" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -163.0
+offset_top = -207.0
+offset_right = 164.0
+offset_bottom = -124.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="AncientBanner" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -163.0
+offset_top = -207.0
+offset_right = 164.0
+offset_bottom = -124.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Fire" type="AnimatedSprite2D" parent="CardContainer/AncientBanner"]
+position = Vector2(164, -10)
+scale = Vector2(0.6, 0.6)
+sprite_frames = SubResource("SpriteFrames_1rlg0")
+autoplay = "default"
+frame_progress = 0.853734
+
+[node name="TitleLabel" type="Label" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = -105.0
+offset_top = -204.0
+offset_right = 105.0
+offset_bottom = -150.0
+theme_override_colors/font_color = Color(1, 0.964706, 0.886275, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.188235)
+theme_override_colors/font_outline_color = Color(0.301961, 0.294118, 0.25098, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 12
+theme_override_constants/shadow_outline_size = 12
+theme_override_fonts/font = SubResource("FontVariation_2eadq")
+theme_override_font_sizes/font_size = 26
+text = "Broken Card"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="TypePlaque" type="NinePatchRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -30.5
+offset_top = 1.0
+offset_right = 30.5
+offset_bottom = 38.0
+grow_horizontal = 2
+grow_vertical = 2
+patch_margin_left = 13
+patch_margin_right = 12
+
+[node name="TypeLabel" type="Label" parent="CardContainer/TypePlaque"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -22.0
+offset_top = -14.0
+offset_right = 22.0
+offset_bottom = 14.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0, 0, 0, 0.752941)
+theme_override_font_sizes/font_size = 16
+text = "Attack"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="EnergyIcon" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -166.0
+offset_top = -227.0
+offset_right = -102.0
+offset_bottom = -163.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(32, 32)
+mouse_filter = 2
+expand_mode = 2
+stretch_mode = 5
+
+[node name="EnergyLabel" type="Label" parent="CardContainer/EnergyIcon"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -23.0
+offset_top = -26.0
+offset_right = 23.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(23, 28)
+theme_override_colors/font_color = Color(0, 1, 0, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.188235)
+theme_override_colors/font_outline_color = Color(0.1225, 0.35, 0.137667, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 16
+theme_override_constants/shadow_outline_size = 16
+theme_override_font_sizes/font_size = 32
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="UnplayableEnergyIcon" type="TextureRect" parent="CardContainer/EnergyIcon"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 56.0
+offset_bottom = 56.0
+expand_mode = 1
+
+[node name="StarIcon" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -186.0
+offset_top = -189.0
+offset_right = -128.0
+offset_bottom = -131.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(29, 29)
+mouse_filter = 2
+expand_mode = 2
+stretch_mode = 5
+
+[node name="StarLabel" type="Label" parent="CardContainer/StarIcon"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -14.0
+offset_top = -20.0
+offset_right = 14.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.964706, 0.886275, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.188235)
+theme_override_colors/font_outline_color = Color(0.1008, 0.3668, 0.42, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 12
+theme_override_constants/shadow_outline_size = 12
+theme_override_font_sizes/font_size = 22
+text = "X"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="UnplayableStarIcon" type="TextureRect" parent="CardContainer/StarIcon"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = 53.0
+offset_bottom = 53.0
+expand_mode = 1
+
+[node name="Enchantment" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_ots2x")
+layout_mode = 0
+offset_left = -166.0
+offset_top = -116.0
+offset_right = -94.0
+offset_bottom = -62.0
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Icon" type="TextureRect" parent="CardContainer/Enchantment"]
+layout_mode = 0
+offset_left = 14.0
+offset_top = 9.0
+offset_right = 49.0
+offset_bottom = 44.0
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="CardContainer/Enchantment"]
+layout_mode = 0
+offset_left = 26.0
+offset_top = 27.0
+offset_right = 66.0
+offset_bottom = 53.0
+pivot_offset = Vector2(20, 13)
+theme_override_colors/font_color = Color(1, 0.964706, 0.886275, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.25098)
+theme_override_colors/font_outline_color = Color(0.0341, 0.05687, 0.11, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_constants/outline_size = 8
+theme_override_constants/shadow_outline_size = 8
+text = "2"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="EnchantmentVfxOverride" type="TextureRect" parent="CardContainer"]
+unique_name_in_owner = true
+visible = false
+material = SubResource("ShaderMaterial_sh66y")
+layout_mode = 0
+offset_left = -202.0
+offset_top = -142.0
+offset_right = -58.0
+offset_bottom = -34.0
+
+[node name="CardSparkles" parent="CardContainer"]
+_import_path = NodePath("")
+unique_name_in_owner = false
+process_mode = 0
+process_priority = 0
+process_physics_priority = 0
+process_thread_group = 0
+physics_interpolation_mode = 0
+auto_translate_mode = 0
+editor_description = ""
+visible = false
+script = null

@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Godot;
@@ -33,6 +34,8 @@ public static class ReForgeModManager
 	private static readonly HashSet<string> ResourceMissCache = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly Dictionary<string, Texture2D> TextureCache = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly HashSet<string> TextureMissCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly Dictionary<string, PackedScene> PackedSceneCache = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly HashSet<string> PackedSceneMissCache = new(StringComparer.OrdinalIgnoreCase);
 	private static ReForgeModSettings _activeSettings = ReForgeModSettingsStore.Clone(ReForgeModSettings.Default);
 
 	public static event Action<ReForgeModContext>? OnModDetected;
@@ -921,6 +924,88 @@ public static class ReForgeModManager
 		return true;
 	}
 
+	/// <summary>
+	/// 尝试从模组资源链路加载 PackedScene。
+	/// 先按 Godot 资源路径直接加载，失败时回退到嵌入资源字节落盘（user://）后再加载。
+	/// </summary>
+	public static bool TryLoadPackedScene(string resourcePath, out PackedScene scene)
+	{
+		scene = null!;
+		if (!_initialized)
+		{
+			Initialize();
+		}
+
+		string normalized = ResourcePathResolver.Normalize(resourcePath);
+		lock (ResourceCacheSync)
+		{
+			if (PackedSceneCache.TryGetValue(normalized, out PackedScene? cached)
+				&& GodotObject.IsInstanceValid(cached))
+			{
+				scene = cached;
+				return true;
+			}
+
+			PackedSceneCache.Remove(normalized);
+			if (PackedSceneMissCache.Contains(normalized))
+			{
+				return false;
+			}
+		}
+
+		if (TryLoadPackedSceneFromGodotPath(normalized, out scene))
+		{
+			lock (ResourceCacheSync)
+			{
+				PackedSceneCache[normalized] = scene;
+				PackedSceneMissCache.Remove(normalized);
+			}
+
+			return true;
+		}
+
+		if (!TryReadResourceBytes(normalized, out byte[] bytes))
+		{
+			lock (ResourceCacheSync)
+			{
+				PackedSceneMissCache.Add(normalized);
+			}
+
+			return false;
+		}
+
+		if (!TryMaterializeEmbeddedSceneToUserPath(normalized, bytes, out string userCachePath))
+		{
+			lock (ResourceCacheSync)
+			{
+				PackedSceneMissCache.Add(normalized);
+			}
+
+			GD.PrintErr($"[ReForge.ModLoader] Failed to materialize embedded scene '{normalized}' to user cache.");
+			return false;
+		}
+
+		if (!TryLoadPackedSceneFromGodotPath(userCachePath, out scene))
+		{
+			lock (ResourceCacheSync)
+			{
+				PackedSceneMissCache.Add(normalized);
+			}
+
+			GD.PrintErr($"[ReForge.ModLoader] Failed to load PackedScene from cached user path '{userCachePath}' (source '{normalized}').");
+			return false;
+		}
+
+		lock (ResourceCacheSync)
+		{
+			PackedSceneCache[normalized] = scene;
+			PackedSceneMissCache.Remove(normalized);
+		}
+
+		GD.Print($"[ReForge.ModLoader] PackedScene loaded from embedded resource '{normalized}' via '{userCachePath}'.");
+		return true;
+	}
+
 	private static void CacheResourceHit(string normalizedPath, byte[] bytes)
 	{
 		lock (ResourceCacheSync)
@@ -946,7 +1031,134 @@ public static class ReForgeModManager
 			ResourceMissCache.Clear();
 			TextureCache.Clear();
 			TextureMissCache.Clear();
+			PackedSceneCache.Clear();
+			PackedSceneMissCache.Clear();
 		}
+	}
+
+	private static bool TryLoadPackedSceneFromGodotPath(string resourcePath, out PackedScene scene)
+	{
+		scene = null!;
+		foreach (string candidate in EnumerateSceneLoadCandidates(resourcePath))
+		{
+			if (!ResourceLoader.Exists(candidate))
+			{
+				continue;
+			}
+
+			PackedScene? loaded = ResourceLoader.Load<PackedScene>(candidate);
+			if (loaded == null)
+			{
+				continue;
+			}
+
+			scene = loaded;
+			return true;
+		}
+
+		return false;
+	}
+
+	private static IEnumerable<string> EnumerateSceneLoadCandidates(string resourcePath)
+	{
+		yield return resourcePath;
+
+		if (!resourcePath.StartsWith("res://", StringComparison.OrdinalIgnoreCase)
+			&& !resourcePath.StartsWith("user://", StringComparison.OrdinalIgnoreCase))
+		{
+			string relative = ResourcePathResolver.NormalizeToRelative(resourcePath);
+			yield return $"res://{relative}";
+			yield return $"user://{relative}";
+		}
+	}
+
+	private static bool TryMaterializeEmbeddedSceneToUserPath(string normalizedPath, byte[] bytes, out string userPath)
+	{
+		userPath = string.Empty;
+		try
+		{
+			string relative = ResourcePathResolver.NormalizeToRelative(normalizedPath);
+			string safeRelative = BuildEmbeddedCacheRelativePath(relative);
+			userPath = $"user://reforge/embedded_scene_cache/{safeRelative}";
+			string globalPath = ProjectSettings.GlobalizePath(userPath);
+			string? parentDirectory = Path.GetDirectoryName(globalPath);
+			if (!string.IsNullOrWhiteSpace(parentDirectory))
+			{
+				Directory.CreateDirectory(parentDirectory);
+			}
+
+			if (!File.Exists(globalPath) || !HasSameContent(globalPath, bytes))
+			{
+				File.WriteAllBytes(globalPath, bytes);
+			}
+
+			return true;
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.ModLoader] Exception while materializing embedded scene '{normalizedPath}'. {ex}");
+			userPath = string.Empty;
+			return false;
+		}
+	}
+
+	private static string BuildEmbeddedCacheRelativePath(string relativePath)
+	{
+		if (string.IsNullOrWhiteSpace(relativePath))
+		{
+			return "scene.tscn";
+		}
+
+		string[] rawSegments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (rawSegments.Length == 0)
+		{
+			return "scene.tscn";
+		}
+
+		string[] sanitizedSegments = new string[rawSegments.Length];
+		for (int i = 0; i < rawSegments.Length; i++)
+		{
+			sanitizedSegments[i] = SanitizePathSegment(rawSegments[i]);
+		}
+
+		return string.Join('/', sanitizedSegments);
+	}
+
+	private static string SanitizePathSegment(string segment)
+	{
+		if (string.IsNullOrWhiteSpace(segment))
+		{
+			return "_";
+		}
+
+		StringBuilder builder = new(segment.Length);
+		for (int i = 0; i < segment.Length; i++)
+		{
+			char current = segment[i];
+			if (char.IsLetterOrDigit(current) || current is '_' or '-' or '.')
+			{
+				builder.Append(current);
+			}
+			else
+			{
+				builder.Append('_');
+			}
+		}
+
+		string sanitized = builder.ToString().Trim('_');
+		return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
+	}
+
+	private static bool HasSameContent(string filePath, byte[] bytes)
+	{
+		FileInfo info = new(filePath);
+		if (!info.Exists || info.Length != bytes.Length)
+		{
+			return false;
+		}
+
+		byte[] existing = File.ReadAllBytes(filePath);
+		return CryptographicOperations.FixedTimeEquals(existing, bytes);
 	}
 
 	private static bool TryReadFromMod(ReForgeModContext mod, string normalizedPath, out byte[] bytes)
