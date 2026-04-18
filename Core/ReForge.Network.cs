@@ -292,6 +292,7 @@ public static partial class ReForge
 			TryRegisterBuiltInMessage<ReForgeCombatTimelyEventSyncMessage>(service, ReForgeBuiltinMessageIds.CombatTimelyEventSync);
 			TryRegisterBuiltInMessage<ReForgePlayerSyncMessage>(service, ReForgeBuiltinMessageIds.PlayerSync);
 			TryRegisterBuiltInMessage<ReForgeRoomSyncMessage>(service, ReForgeBuiltinMessageIds.RoomSync);
+			TryRegisterBuiltInMessage<ReForgeDebuffSelectionSyncMessage>(service, ReForgeBuiltinMessageIds.DebuffSelectionSync);
 		}
 
 		private static void TryRegisterBuiltInMessage<T>(ReForgeNetService service, byte id) where T : IReForgeNetMessage, new()

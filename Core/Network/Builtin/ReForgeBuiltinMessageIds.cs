@@ -16,4 +16,5 @@ internal static class ReForgeBuiltinMessageIds
 	public const byte CombatTimelyEventSync = 245;
 	public const byte PlayerSync = 246;
 	public const byte RoomSync = 247;
+	public const byte DebuffSelectionSync = 248;
 }

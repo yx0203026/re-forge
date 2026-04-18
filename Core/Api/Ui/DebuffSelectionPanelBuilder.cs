@@ -4,12 +4,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Godot;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
+using ReForgeFramework.Networking;
 
 namespace ReForgeFramework.Api.Ui;
 
@@ -18,11 +24,17 @@ namespace ReForgeFramework.Api.Ui;
 /// </summary>
 public sealed class DebuffSelectionPanelBuilder
 {
+	private static readonly object NetworkSyncLock = new();
+	private static bool _networkSyncHandlerRegistered;
+	private static readonly ReForgeMessageHandlerDelegate<ReForgeDebuffSelectionSyncMessage> DebuffSelectionSyncHandler = OnDebuffSelectionSynced;
+
 	private readonly List<DebuffSelectionEntry> _entries = new();
 	private LocString? _title;
 	private int _minSelect = 1;
 	private int _maxSelect = 1;
 	private bool _cancelable = true;
+	private bool _randomModeEnabled;
+	private int _maxDisplayCount;
 
 	/// <summary>
 	/// 设置弹窗标题（本地化文本）。
@@ -83,6 +95,31 @@ public sealed class DebuffSelectionPanelBuilder
 	public DebuffSelectionPanelBuilder WithCancelable(bool cancelable)
 	{
 		_cancelable = cancelable;
+		return this;
+	}
+
+	/// <summary>
+	/// 设置是否启用随机模式。
+	/// 启用后，若同时设置了有效的最大展示数量，将从已注册 Debuff 中随机抽样展示。
+	/// </summary>
+	public DebuffSelectionPanelBuilder WithRandomMode(bool enabled = true)
+	{
+		_randomModeEnabled = enabled;
+		return this;
+	}
+
+	/// <summary>
+	/// 设置最大展示数量。
+	/// 传入 0 表示不限制（保持全部展示）。
+	/// </summary>
+	public DebuffSelectionPanelBuilder WithMaxDisplayCount(int maxDisplayCount)
+	{
+		if (maxDisplayCount < 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(maxDisplayCount), maxDisplayCount, "maxDisplayCount must be >= 0.");
+		}
+
+		_maxDisplayCount = maxDisplayCount;
 		return this;
 	}
 
@@ -149,19 +186,21 @@ public sealed class DebuffSelectionPanelBuilder
 			throw new InvalidOperationException("No debuff entries were provided. Call AddDebuff before ShowAsync.");
 		}
 
-		if (_minSelect > _entries.Count)
+		List<DebuffSelectionEntry> entriesToShow = ResolveEntriesForDisplay();
+
+		if (_minSelect > entriesToShow.Count)
 		{
-			throw new InvalidOperationException($"minSelect ({_minSelect}) cannot be greater than entry count ({_entries.Count}).");
+			throw new InvalidOperationException($"minSelect ({_minSelect}) cannot be greater than entry count ({entriesToShow.Count}).");
 		}
 
-		int resolvedMax = Math.Min(_maxSelect, _entries.Count);
+		int resolvedMax = Math.Min(_maxSelect, entriesToShow.Count);
 		LocString resolvedTitle = _title ?? new LocString("gameplay_ui", "REFORGE.UI.DEBUFF_SELECTION.TITLE");
 
 		await ReForge.LifecycleSafety.WaitForOverlayReadyAsync();
 		ReForge.LifecycleSafety.EnsureOverlayReady();
 
 		IReadOnlyList<DebuffSelectionEntry> selected = await DebuffSelectionOverlayScreen.ShowAndWait(
-			_entries,
+			entriesToShow,
 			resolvedTitle,
 			_minSelect,
 			resolvedMax,
@@ -182,15 +221,159 @@ public sealed class DebuffSelectionPanelBuilder
 		bool silent = false)
 	{
 		ArgumentNullException.ThrowIfNull(target);
+		EnsureNetworkSyncHandlerRegistered();
 
 		IReadOnlyList<DebuffSelectionResult> selected = await ShowAsync();
+		await ApplySelectionToTargetAsync(selected, target, applier, cardSource, silent);
+
+		if (ShouldBroadcastSelection(target, selected))
+		{
+			BroadcastSelection(target, applier, selected, silent);
+		}
+
+		return selected;
+	}
+
+	private static bool ShouldBroadcastSelection(Creature target, IReadOnlyList<DebuffSelectionResult> selected)
+	{
+		if (!ReForge.Network.IsConnected || selected.Count == 0)
+		{
+			return false;
+		}
+
+		if (!target.IsPlayer || target.Player == null)
+		{
+			GD.Print("[ReForge.UI.DebuffSelection] Multiplayer sync skipped: target is not a player creature.");
+			return false;
+		}
+
+		return true;
+	}
+
+	private static async Task ApplySelectionToTargetAsync(
+		IReadOnlyList<DebuffSelectionResult> selected,
+		Creature target,
+		Creature? applier,
+		CardModel? cardSource,
+		bool silent)
+	{
 		foreach (DebuffSelectionResult result in selected)
 		{
 			PowerModel mutablePower = result.Debuff.ToMutable();
 			await PowerCmd.Apply(mutablePower, target, result.Amount, applier, cardSource, silent);
 		}
+	}
 
-		return selected;
+	private static void EnsureNetworkSyncHandlerRegistered()
+	{
+		if (_networkSyncHandlerRegistered)
+		{
+			return;
+		}
+
+		lock (NetworkSyncLock)
+		{
+			if (_networkSyncHandlerRegistered)
+			{
+				return;
+			}
+
+			ReForge.Network.RegisterHandler(DebuffSelectionSyncHandler);
+			_networkSyncHandlerRegistered = true;
+		}
+	}
+
+	private static void BroadcastSelection(
+		Creature target,
+		Creature? applier,
+		IReadOnlyList<DebuffSelectionResult> selected,
+		bool silent)
+	{
+		Player? targetPlayer = target.Player;
+		if (targetPlayer == null)
+		{
+			return;
+		}
+
+		ReForgeDebuffSelectionSyncMessage message = new()
+		{
+			TargetPlayerNetId = targetPlayer.NetId,
+			ApplierPlayerNetId = applier?.Player?.NetId ?? 0,
+			Silent = silent
+		};
+
+		for (int i = 0; i < selected.Count; i++)
+		{
+			DebuffSelectionResult item = selected[i];
+			message.Items.Add(new DebuffSelectionSyncItem
+			{
+				PowerCategory = item.DebuffId.Category,
+				PowerEntry = item.DebuffId.Entry,
+				Amount = item.Amount
+			});
+		}
+
+		ReForge.Network.Send(message);
+		GD.Print($"[ReForge.UI.DebuffSelection] Broadcasted debuff selection sync. target={message.TargetPlayerNetId}, itemCount={message.Items.Count}.");
+	}
+
+	private static void OnDebuffSelectionSynced(ReForgeDebuffSelectionSyncMessage message, ulong senderId)
+	{
+		if (senderId == ReForge.Network.LocalPeerId)
+		{
+			return;
+		}
+
+		RunState? runState = RunManager.Instance?.DebugOnlyGetState();
+		if (runState == null)
+		{
+			return;
+		}
+
+		Player? targetPlayer = runState.Players.FirstOrDefault(player => player.NetId == message.TargetPlayerNetId);
+		if (targetPlayer == null || !targetPlayer.Creature.IsAlive)
+		{
+			GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync apply skipped: target player not found or dead. target={message.TargetPlayerNetId}.");
+			return;
+		}
+
+		Creature? applierCreature = null;
+		if (message.ApplierPlayerNetId != 0)
+		{
+			applierCreature = runState.Players
+				.FirstOrDefault(player => player.NetId == message.ApplierPlayerNetId)
+				?.Creature;
+		}
+
+		TaskHelper.RunSafely(ApplySyncedSelectionAsync(message, targetPlayer.Creature, applierCreature));
+	}
+
+	private static async Task ApplySyncedSelectionAsync(
+		ReForgeDebuffSelectionSyncMessage message,
+		Creature target,
+		Creature? applier)
+	{
+		for (int i = 0; i < message.Items.Count; i++)
+		{
+			DebuffSelectionSyncItem item = message.Items[i];
+			if (item.Amount <= 0 || string.IsNullOrWhiteSpace(item.PowerCategory) || string.IsNullOrWhiteSpace(item.PowerEntry))
+			{
+				continue;
+			}
+
+			ModelId powerId = new(item.PowerCategory, item.PowerEntry);
+			PowerModel? debuff = ModelDb.GetByIdOrNull<PowerModel>(powerId);
+			if (debuff == null)
+			{
+				GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync apply skipped: power not found. id={powerId}.");
+				continue;
+			}
+
+			PowerModel mutablePower = debuff.ToMutable();
+			await PowerCmd.Apply(mutablePower, target, item.Amount, applier, cardSource: null, message.Silent);
+		}
+
+		GD.Print($"[ReForge.UI.DebuffSelection] Synced debuff selection applied. target={message.TargetPlayerNetId}, itemCount={message.Items.Count}.");
 	}
 
 	private static void EnsureDebuff(PowerModel power)
@@ -200,6 +383,25 @@ public sealed class DebuffSelectionPanelBuilder
 			throw new InvalidOperationException(
 				$"Power '{power.Id}' is not Debuff (actual: {power.TypeForCurrentAmount}).");
 		}
+	}
+
+	private List<DebuffSelectionEntry> ResolveEntriesForDisplay()
+	{
+		if (!_randomModeEnabled || _maxDisplayCount <= 0 || _entries.Count <= _maxDisplayCount)
+		{
+			return new List<DebuffSelectionEntry>(_entries);
+		}
+
+		// Fisher-Yates 洗牌后截断，保证每个候选有均等概率进入展示池。
+		List<DebuffSelectionEntry> shuffled = new(_entries);
+		Random random = new();
+		for (int i = shuffled.Count - 1; i > 0; i--)
+		{
+			int swapIndex = random.Next(i + 1);
+			(shuffled[i], shuffled[swapIndex]) = (shuffled[swapIndex], shuffled[i]);
+		}
+
+		return shuffled.Take(_maxDisplayCount).ToList();
 	}
 }
 
