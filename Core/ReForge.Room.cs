@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Map;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using ReForgeFramework.Networking;
@@ -22,7 +23,7 @@ public static partial class ReForge
 		private static readonly object SyncRoot = new();
 		private static bool _initialized;
 		private static bool _handlerRegistered;
-		private static readonly ReForgeMessageHandlerDelegate<ReForgeRoomSyncMessage> SyncHandler = OnSyncMessage;
+		private static readonly MessageHandlerDelegate<ReForgeRoomSyncMessage> SyncHandler = OnSyncMessage;
 
 		public static bool IsInitialized => _initialized;
 
@@ -299,12 +300,18 @@ public static partial class ReForge
 				return false;
 			}
 
-			if (ReForge.Network.LocalPeerId == 1)
+			if (ReForge.Network.IsHostAuthority)
 			{
 				return false;
 			}
 
-			ReForge.Network.SendTo(1, message);
+			ulong hostPeerId = ReForge.Network.HostPeerId;
+			if (hostPeerId == 0)
+			{
+				return false;
+			}
+
+			ReForge.Network.SendTo(hostPeerId, message);
 			return true;
 		}
 
@@ -315,7 +322,7 @@ public static partial class ReForge
 				return;
 			}
 
-			if (ReForge.Network.LocalPeerId != 1)
+			if (!ReForge.Network.IsHostAuthority)
 			{
 				return;
 			}
@@ -390,7 +397,7 @@ public static partial class ReForge
 						return;
 				}
 
-				if (ReForge.Network.IsConnected && ReForge.Network.LocalPeerId == 1 && senderId != ReForge.Network.LocalPeerId)
+				if (ReForge.Network.IsConnected && ReForge.Network.IsHostAuthority && senderId != ReForge.Network.LocalPeerId)
 				{
 					ReForge.Network.Send(message);
 				}

@@ -3,11 +3,11 @@
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// 数据包传输模式。
+/// 兼容层：历史 ReForge 网络传输模式。
 /// </summary>
 public enum ReForgeNetTransferMode
 {
 	None = 0,
-	Unreliable = 1,
-	Reliable = 2,
+	Reliable = 1,
+	Unreliable = 2
 }

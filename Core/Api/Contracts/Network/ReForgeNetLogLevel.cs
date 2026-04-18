@@ -3,7 +3,7 @@
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// 网络日志级别（与 STS2 官方 LogLevel 思路保持一致，但不强耦合官方类型）。
+/// 兼容层：历史 ReForge 网络日志级别。
 /// </summary>
 public enum ReForgeNetLogLevel
 {
@@ -11,5 +11,5 @@ public enum ReForgeNetLogLevel
 	Debug = 1,
 	Info = 2,
 	Warn = 3,
-	Error = 4,
+	Error = 4
 }

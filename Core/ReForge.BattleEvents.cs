@@ -3,6 +3,7 @@
 using System;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
 using ReForgeFramework.Api.Events;
 using ReForgeFramework.BattleEvents;
@@ -27,7 +28,7 @@ public static partial class ReForge
 		private static bool _initialized;
 		private static bool _handlerRegistered;
 
-		private static readonly ReForgeMessageHandlerDelegate<ReForgeCombatTimelyEventSyncMessage> SyncHandler = OnSyncMessage;
+		private static readonly MessageHandlerDelegate<ReForgeCombatTimelyEventSyncMessage> SyncHandler = OnSyncMessage;
 		private static Func<bool>? _authorityResolver;
 
 		public static bool IsInitialized => _initialized;
@@ -98,8 +99,7 @@ public static partial class ReForge
 				}
 			}
 
-			// 默认 peerId=1 为权威端；若没有连接则本地即权威。
-			return !Network.IsConnected || Network.LocalPeerId == 1;
+			return Network.IsHostAuthority;
 		}
 
 		internal static void OnCombatEnter(IRunState? runState, CombatState? combatState)
@@ -137,15 +137,6 @@ public static partial class ReForge
 			if (_handlerRegistered)
 			{
 				return;
-			}
-
-			try
-			{
-				Network.RegisterMessage<ReForgeCombatTimelyEventSyncMessage>(ReForgeBuiltinMessageIds.CombatTimelyEventSync);
-			}
-			catch (Exception ex)
-			{
-				GD.PrintErr($"[ReForge.BattleEvents] message registration skipped. {ex.GetType().Name}: {ex.Message}");
 			}
 
 			Network.RegisterHandler(SyncHandler);

@@ -1,24 +1,34 @@
 #nullable enable
 
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Multiplayer.Transport;
+
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// ReForge 网络消息契约。
+/// 兼容层：历史 ReForge 消息接口。
+/// 通过默认接口实现桥接到官方 INetMessage。
 /// </summary>
-public interface IReForgeNetMessage : IReForgePacketSerializable
+public interface IReForgeNetMessage : IReForgePacketSerializable, INetMessage
 {
-	/// <summary>
-	/// 是否在接收端继续向其他 Peer 广播。
-	/// </summary>
-	bool ShouldBroadcast { get; }
+	new bool ShouldBroadcast { get; }
 
-	/// <summary>
-	/// 传输模式（可靠/不可靠）。
-	/// </summary>
-	ReForgeNetTransferMode Mode { get; }
+	new ReForgeNetTransferMode Mode { get; }
 
-	/// <summary>
-	/// 消息分发过程的建议日志级别。
-	/// </summary>
-	ReForgeNetLogLevel LogLevel { get; }
+	new ReForgeNetLogLevel LogLevel { get; }
+
+	NetTransferMode INetMessage.Mode => Mode.ToOfficial();
+
+	LogLevel INetMessage.LogLevel => LogLevel.ToOfficial();
+
+	void IPacketSerializable.Serialize(PacketWriter writer)
+	{
+		Serialize(new ReForgePacketWriter(writer));
+	}
+
+	void IPacketSerializable.Deserialize(PacketReader reader)
+	{
+		Deserialize(new ReForgePacketReader(reader));
+	}
 }

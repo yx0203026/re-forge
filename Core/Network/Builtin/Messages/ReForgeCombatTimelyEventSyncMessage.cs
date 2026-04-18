@@ -1,6 +1,9 @@
 #nullable enable
 
 using System;
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Multiplayer.Transport;
 
 namespace ReForgeFramework.Networking;
 
@@ -8,7 +11,7 @@ namespace ReForgeFramework.Networking;
 /// 战斗及时事件网络触发消息。
 /// 由权威端发送 eventId，客户端收到后在本地执行同名事件。
 /// </summary>
-internal sealed class ReForgeCombatTimelyEventSyncMessage : IReForgeNetMessage
+internal sealed class ReForgeCombatTimelyEventSyncMessage : INetMessage
 {
 	public long Sequence { get; set; }
 
@@ -18,18 +21,18 @@ internal sealed class ReForgeCombatTimelyEventSyncMessage : IReForgeNetMessage
 
 	public bool ShouldBroadcast => false;
 
-	public ReForgeNetTransferMode Mode => ReForgeNetTransferMode.Unreliable;
+	public NetTransferMode Mode => NetTransferMode.Unreliable;
 
-	public ReForgeNetLogLevel LogLevel => ReForgeNetLogLevel.Trace;
+	public LogLevel LogLevel => LogLevel.VeryDebug;
 
-	public void Serialize(ReForgePacketWriter writer)
+	public void Serialize(PacketWriter writer)
 	{
 		writer.WriteLong(Sequence);
 		writer.WriteLong(UtcNowMs);
 		writer.WriteString(EventId ?? string.Empty);
 	}
 
-	public void Deserialize(ReForgePacketReader reader)
+	public void Deserialize(PacketReader reader)
 	{
 		Sequence = reader.ReadLong();
 		UtcNowMs = reader.ReadLong();

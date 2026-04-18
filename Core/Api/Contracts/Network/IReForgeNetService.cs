@@ -3,7 +3,7 @@
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// 网络服务抽象（消息注册/发送/处理）。
+/// 兼容层：保留历史接口定义，实际由 ReForge.Network 静态入口承载。
 /// </summary>
 public interface IReForgeNetService
 {

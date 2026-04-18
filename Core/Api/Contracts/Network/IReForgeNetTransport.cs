@@ -5,7 +5,7 @@ using System;
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// 传输层抽象。可由 ENet、Steam 或内存回环实现。
+/// 兼容层占位接口：新架构已不再使用自定义传输。
 /// </summary>
 public interface IReForgeNetTransport : IDisposable
 {

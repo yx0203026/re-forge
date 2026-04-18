@@ -1,53 +1,88 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using Godot;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Runs;
+using ReForgeFramework.Api.Ui;
 using ReForgeFramework.Networking;
 
 public static partial class ReForge
 {
 	/// <summary>
 	/// ReForge 网络能力入口。
-	/// 架构对齐 STS2 官方：消息契约 + 类型注册 + 消息总线 + 传输抽象。
+	/// 该层只做 STS2 官方 NetService 的二次便捷封装，不再维护独立传输协议栈。
 	/// </summary>
 	public static class Network
 	{
+		private sealed class HandlerRegistration
+		{
+			public required Action<INetGameService> RegisterAction { get; init; }
+
+			public required Action<INetGameService> UnregisterAction { get; init; }
+		}
+
 		private static readonly object SyncRoot = new();
-		private static ReForgeNetService? _service;
-		private static ReForgeNetworkDiagnosticsRuntime? _diagnostics;
-		private static ReForgeModelCatalogHandshakeRuntime? _catalogHandshake;
-		private static ReForgeNetProtocolInteropMode _interopMode = ReForgeNetProtocolInteropMode.Hybrid;
 		private static bool _initialized;
-		private static bool _autoPumpAttached;
-		private static bool _autoPumpCreated;
-		private static Callable _autoPump;
+		private static bool _processHookAttached;
+		private static bool _processHookCreated;
+		private static Callable _processHook;
+		private static INetGameService? _cachedService;
+		private static readonly Dictionary<(Type MessageType, Delegate Handler), HandlerRegistration> HandlerRegistrations = new();
+		private static INetGameService? _registeredService;
+		private static readonly HashSet<(Type MessageType, Delegate Handler)> AppliedRegistrationKeys = new();
 
 		public static bool IsInitialized => _initialized;
 
-		public static bool IsConnected => Service.IsConnected;
-
-		public static ulong LocalPeerId => Service.LocalPeerId;
-
-		public static ReForgeModelCatalogHashSnapshot LocalModelCatalogHash => _catalogHandshake?.LocalSnapshot ?? new ReForgeModelCatalogHashSnapshot(0, 0, 0);
-
-		public static bool HasModelCatalogMismatch => _catalogHandshake?.HasMismatch ?? false;
-
-		public static string? LastModelCatalogMismatchReason => _catalogHandshake?.LastMismatchReason;
-
-		public static ReForgeNetProtocolInteropMode InteropMode
+		public static bool IsConnected
 		{
-			get => _interopMode;
-			set
+			get
 			{
-				_interopMode = value;
-				if (_service != null)
-				{
-					_service.SetProtocolInteropMode(value);
-				}
+				INetGameService? service = ResolveService();
+				return service != null && service.IsConnected && service.Type.IsMultiplayer();
 			}
 		}
 
-		public static void Initialize(ulong localPeerId = 1)
+		public static ulong LocalPeerId => ResolveService()?.NetId ?? 0;
+
+		public static bool IsHostAuthority
+		{
+			get
+			{
+				INetGameService? service = ResolveService();
+				if (service == null)
+				{
+					return true;
+				}
+
+				return service.Type != NetGameType.Client;
+			}
+		}
+
+		public static ulong HostPeerId
+		{
+			get
+			{
+				INetGameService? service = ResolveService();
+				if (service == null)
+				{
+					return 0;
+				}
+
+				if (service.Type == NetGameType.Client && service is NetClientGameService client)
+				{
+					return client.HostNetId;
+				}
+
+				return service.NetId;
+			}
+		}
+
+		public static void Initialize()
 		{
 			lock (SyncRoot)
 			{
@@ -56,198 +91,236 @@ public static partial class ReForge
 					return;
 				}
 
-				_service = new ReForgeNetService(new ReForgeLoopbackTransport(localPeerId), _interopMode);
-				RegisterBuiltInMessages(_service);
-				_diagnostics = new ReForgeNetworkDiagnosticsRuntime(_service, GetUtcNowMs);
-				_catalogHandshake = new ReForgeModelCatalogHandshakeRuntime(_service, GetUtcNowMs);
-				_diagnostics.Initialize();
-				_catalogHandshake.Initialize();
 				_initialized = true;
 			}
 
-			TryAttachAutoPump();
-			GD.Print($"[ReForge.Network] initialized with loopback transport. localPeerId={localPeerId}.");
+			TryAttachProcessHook();
+			GD.Print("[ReForge.Network] initialized over STS2 official NetService wrapper.");
 		}
 
-		public static void UseTransport(IReForgeNetTransport transport)
+		public static void RegisterMessage<T>(byte id) where T : INetMessage, new()
 		{
-			ArgumentNullException.ThrowIfNull(transport);
-			EnsureInitialized();
+			Initialize();
+			GD.Print($"[ReForge.Network] RegisterMessage<{typeof(T).Name}> ignored. official NetService uses global message type ids.");
+		}
 
+		public static void RegisterHandler<T>(MessageHandlerDelegate<T> handler) where T : INetMessage
+		{
+			ArgumentNullException.ThrowIfNull(handler);
+
+			(Type MessageType, Delegate Handler) key = (typeof(T), handler);
 			lock (SyncRoot)
 			{
-				Service.SetTransport(transport);
+				if (HandlerRegistrations.ContainsKey(key))
+				{
+					return;
+				}
+
+				HandlerRegistrations[key] = new HandlerRegistration
+				{
+					RegisterAction = service => service.RegisterMessageHandler(handler),
+					UnregisterAction = service => service.UnregisterMessageHandler(handler)
+				};
 			}
 
-			TryAttachAutoPump();
-			GD.Print($"[ReForge.Network] switched transport to '{transport.GetType().FullName}'.");
-		}
-
-		public static void UseENetHostSkeleton(
-			ushort port,
-			int maxClients = 4,
-			ulong localPeerId = 1,
-			ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid)
-		{
-			InteropMode = interopMode;
-			UseTransport(ReForgeENetTransport.CreateHost(port, maxClients, localPeerId));
-		}
-
-		public static void UseENetClientSkeleton(
-			string host,
-			ushort port,
-			ulong localPeerId,
-			ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid)
-		{
-			InteropMode = interopMode;
-			UseTransport(ReForgeENetTransport.CreateClient(host, port, localPeerId));
-		}
-
-		public static void UseENetClientSkeleton(
-			string host,
-			ushort port,
-			ulong localPeerId,
-			bool autoReconnect,
-			int maxReconnectAttempts,
-			ReForgeNetProtocolInteropMode interopMode = ReForgeNetProtocolInteropMode.Hybrid,
-			int reconnectInitialDelayMs = 500,
-			int reconnectMaxDelayMs = 8000)
-		{
-			InteropMode = interopMode;
-			UseTransport(ReForgeENetTransport.CreateClient(
-				host,
-				port,
-				localPeerId,
-				autoReconnect,
-				maxReconnectAttempts,
-				reconnectInitialDelayMs,
-				reconnectMaxDelayMs));
-		}
-
-		public static void RegisterMessage<T>(byte id) where T : IReForgeNetMessage, new()
-		{
-			EnsureInitialized();
-			Service.RegisterMessage<T>(id);
+			TryApplyRegistrationsNow();
 		}
 
 		public static void RegisterHandler<T>(ReForgeMessageHandlerDelegate<T> handler) where T : IReForgeNetMessage
 		{
-			EnsureInitialized();
-			Service.RegisterMessageHandler(handler);
+			ArgumentNullException.ThrowIfNull(handler);
+			MessageHandlerDelegate<T> officialHandler = (message, senderId) => handler(message, senderId);
+
+			(Type MessageType, Delegate Handler) key = (typeof(T), handler);
+			lock (SyncRoot)
+			{
+				if (HandlerRegistrations.ContainsKey(key))
+				{
+					return;
+				}
+
+				HandlerRegistrations[key] = new HandlerRegistration
+				{
+					RegisterAction = service => service.RegisterMessageHandler(officialHandler),
+					UnregisterAction = service => service.UnregisterMessageHandler(officialHandler)
+				};
+			}
+
+			TryApplyRegistrationsNow();
+		}
+
+		public static void UnregisterHandler<T>(MessageHandlerDelegate<T> handler) where T : INetMessage
+		{
+			ArgumentNullException.ThrowIfNull(handler);
+
+			(Type MessageType, Delegate Handler) key = (typeof(T), handler);
+			HandlerRegistration? registration = null;
+			lock (SyncRoot)
+			{
+				if (HandlerRegistrations.TryGetValue(key, out HandlerRegistration? found))
+				{
+					registration = found;
+					HandlerRegistrations.Remove(key);
+				}
+			}
+
+			if (registration != null && _registeredService != null)
+			{
+				registration.UnregisterAction(_registeredService);
+			}
+
+			lock (SyncRoot)
+			{
+				AppliedRegistrationKeys.Remove(key);
+			}
 		}
 
 		public static void UnregisterHandler<T>(ReForgeMessageHandlerDelegate<T> handler) where T : IReForgeNetMessage
 		{
-			EnsureInitialized();
-			Service.UnregisterMessageHandler(handler);
+			ArgumentNullException.ThrowIfNull(handler);
+
+			(Type MessageType, Delegate Handler) key = (typeof(T), handler);
+			HandlerRegistration? registration = null;
+			lock (SyncRoot)
+			{
+				if (HandlerRegistrations.TryGetValue(key, out HandlerRegistration? found))
+				{
+					registration = found;
+					HandlerRegistrations.Remove(key);
+				}
+			}
+
+			if (registration != null && _registeredService != null)
+			{
+				registration.UnregisterAction(_registeredService);
+			}
+
+			lock (SyncRoot)
+			{
+				AppliedRegistrationKeys.Remove(key);
+			}
 		}
 
-		public static void Send<T>(T message) where T : IReForgeNetMessage
+		public static void Send<T>(T message) where T : INetMessage
 		{
-			EnsureInitialized();
-			Service.Send(message);
+			ArgumentNullException.ThrowIfNull(message);
+			if (!TryResolveConnectedMultiplayerService(out INetGameService service))
+			{
+				GD.PrintErr($"[ReForge.Network] Send ignored. service unavailable or not connected. message={typeof(T).Name}");
+				return;
+			}
+
+			service.SendMessage(message);
 		}
 
-		public static void SendTo<T>(ulong peerId, T message) where T : IReForgeNetMessage
+		public static void SendTo<T>(ulong peerId, T message) where T : INetMessage
 		{
-			EnsureInitialized();
-			Service.SendTo(peerId, message);
+			ArgumentNullException.ThrowIfNull(message);
+			if (!TryResolveConnectedMultiplayerService(out INetGameService service))
+			{
+				GD.PrintErr($"[ReForge.Network] SendTo ignored. service unavailable or not connected. message={typeof(T).Name}");
+				return;
+			}
+
+			if (service.Type == NetGameType.Client)
+			{
+				if (service is not NetClientGameService client)
+				{
+					GD.PrintErr($"[ReForge.Network] SendTo ignored. unexpected client service type '{service.GetType().FullName}'.");
+					return;
+				}
+
+				if (peerId != client.HostNetId)
+				{
+					GD.PrintErr($"[ReForge.Network] SendTo ignored. client can only send to host id={client.HostNetId}, requested={peerId}.");
+					return;
+				}
+
+				service.SendMessage(message);
+				return;
+			}
+
+			service.SendMessage(message, peerId);
 		}
 
 		public static void Update()
 		{
-			EnsureInitialized();
-			Service.Update();
-			_diagnostics?.Update();
-			_catalogHandshake?.Update();
+			Initialize();
+			ResolveService();
 		}
 
-		public static bool TryGetPeerNetworkStats(ulong peerId, out ReForgePeerNetworkStats stats)
+		private static INetGameService? ResolveService()
 		{
-			EnsureInitialized();
-			if (_diagnostics == null)
+			RunManager? runManager = RunManager.Instance;
+			if (runManager?.NetService == null)
 			{
-				stats = new ReForgePeerNetworkStats(peerId, 0, 0, 0, false);
+				_cachedService = null;
+				return null;
+			}
+
+			if (!ReferenceEquals(_cachedService, runManager.NetService))
+			{
+				_cachedService = runManager.NetService;
+				GD.Print($"[ReForge.Network] Bound to official service '{_cachedService.GetType().Name}', type={_cachedService.Type}, netId={_cachedService.NetId}.");
+				TryApplyRegistrationsNow();
+			}
+
+			return _cachedService;
+		}
+
+		private static bool TryResolveConnectedMultiplayerService(out INetGameService service)
+		{
+			service = ResolveService()!;
+			if (service == null)
+			{
 				return false;
 			}
 
-			return _diagnostics.TryGetPeerStats(peerId, out stats);
-		}
-
-		public static void BroadcastModelCatalogHandshake()
-		{
-			EnsureInitialized();
-			_catalogHandshake?.BroadcastHello();
-		}
-
-		public static bool TryGetENetClientReconnectState(
-			out bool isReconnecting,
-			out int reconnectAttempt,
-			out long nextReconnectAtMs,
-			out string lastDisconnectReason)
-		{
-			EnsureInitialized();
-			if (Service.Transport is ReForgeENetTransport enet && enet.Config.Role == ReForgeENetTransport.ReForgeENetRole.Client)
+			if (!service.IsConnected)
 			{
-				isReconnecting = enet.IsReconnecting;
-				reconnectAttempt = enet.ReconnectAttempt;
-				nextReconnectAtMs = enet.NextReconnectAtMs;
-				lastDisconnectReason = enet.LastDisconnectReason;
-				return true;
+				return false;
 			}
 
-			isReconnecting = false;
-			reconnectAttempt = 0;
-			nextReconnectAtMs = 0;
-			lastDisconnectReason = string.Empty;
-			return false;
-		}
-
-		public static bool TryGetENetHostState(
-			out ulong[] connectedPeerIds,
-			out bool hasLastDisconnect,
-			out ulong lastDisconnectedPeerId,
-			out string lastDisconnectReason,
-			out long lastDisconnectAtMs)
-		{
-			EnsureInitialized();
-			if (Service.Transport is ReForgeENetTransport enet && enet.Config.Role == ReForgeENetTransport.ReForgeENetRole.Host)
+			if (!service.Type.IsMultiplayer())
 			{
-				connectedPeerIds = enet.GetHostConnectedPeerIdsSnapshot();
-				hasLastDisconnect = enet.TryGetHostLastDisconnect(out lastDisconnectedPeerId, out lastDisconnectReason, out lastDisconnectAtMs);
-				return true;
+				return false;
 			}
 
-			connectedPeerIds = Array.Empty<ulong>();
-			hasLastDisconnect = false;
-			lastDisconnectedPeerId = 0;
-			lastDisconnectReason = string.Empty;
-			lastDisconnectAtMs = 0;
-			return false;
+			return true;
 		}
 
-		private static ReForgeNetService Service
+		private static void TryApplyRegistrationsNow()
 		{
-			get
-			{
-				EnsureInitialized();
-				return _service!;
-			}
-		}
-
-		private static void EnsureInitialized()
-		{
-			if (_initialized)
+			INetGameService? service = ResolveService();
+			if (service == null)
 			{
 				return;
 			}
 
-			Initialize();
+			lock (SyncRoot)
+			{
+				if (!ReferenceEquals(_registeredService, service))
+				{
+					_registeredService = service;
+					AppliedRegistrationKeys.Clear();
+				}
+
+				foreach (KeyValuePair<(Type MessageType, Delegate Handler), HandlerRegistration> registration in HandlerRegistrations)
+				{
+					if (AppliedRegistrationKeys.Contains(registration.Key))
+					{
+						continue;
+					}
+
+					registration.Value.RegisterAction(service);
+					AppliedRegistrationKeys.Add(registration.Key);
+				}
+			}
 		}
 
-		private static void TryAttachAutoPump()
+		private static void TryAttachProcessHook()
 		{
-			if (_autoPumpAttached)
+			if (_processHookAttached)
 			{
 				return;
 			}
@@ -257,54 +330,25 @@ public static partial class ReForge
 				return;
 			}
 
-			if (!_autoPumpCreated)
+			if (!_processHookCreated)
 			{
-				_autoPump = Callable.From(OnProcessFrame);
-				_autoPumpCreated = true;
+				_processHook = Callable.From(OnProcessFrame);
+				_processHookCreated = true;
 			}
 
-			tree.Connect(SceneTree.SignalName.ProcessFrame, _autoPump);
-			_autoPumpAttached = true;
+			tree.Connect(SceneTree.SignalName.ProcessFrame, _processHook);
+			_processHookAttached = true;
 		}
 
 		private static void OnProcessFrame()
 		{
-			if (_initialized)
+			if (!_initialized)
 			{
-				_service?.Update();
-				_diagnostics?.Update();
-				_catalogHandshake?.Update();
+				return;
 			}
-		}
 
-		private static long GetUtcNowMs()
-		{
-			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		}
-
-		private static void RegisterBuiltInMessages(ReForgeNetService service)
-		{
-			TryRegisterBuiltInMessage<ReForgeNetPingMessage>(service, ReForgeBuiltinMessageIds.Ping);
-			TryRegisterBuiltInMessage<ReForgeNetPongMessage>(service, ReForgeBuiltinMessageIds.Pong);
-			TryRegisterBuiltInMessage<ReForgeNetHeartbeatMessage>(service, ReForgeBuiltinMessageIds.Heartbeat);
-			TryRegisterBuiltInMessage<ReForgeModelCatalogHelloMessage>(service, ReForgeBuiltinMessageIds.ModelCatalogHello);
-			TryRegisterBuiltInMessage<ReForgeModelCatalogResultMessage>(service, ReForgeBuiltinMessageIds.ModelCatalogResult);
-			TryRegisterBuiltInMessage<ReForgeCombatTimelyEventSyncMessage>(service, ReForgeBuiltinMessageIds.CombatTimelyEventSync);
-			TryRegisterBuiltInMessage<ReForgePlayerSyncMessage>(service, ReForgeBuiltinMessageIds.PlayerSync);
-			TryRegisterBuiltInMessage<ReForgeRoomSyncMessage>(service, ReForgeBuiltinMessageIds.RoomSync);
-			TryRegisterBuiltInMessage<ReForgeDebuffSelectionSyncMessage>(service, ReForgeBuiltinMessageIds.DebuffSelectionSync);
-		}
-
-		private static void TryRegisterBuiltInMessage<T>(ReForgeNetService service, byte id) where T : IReForgeNetMessage, new()
-		{
-			try
-			{
-				service.RegisterMessage<T>(id);
-			}
-			catch (Exception ex)
-			{
-				GD.PrintErr($"[ReForge.Network] Failed to register built-in message '{typeof(T).Name}' with id={id}. {ex}");
-			}
+			ResolveService();
+			DebuffSelectionPanelBuilder.InitializeNetworkSyncRuntime();
 		}
 	}
 }

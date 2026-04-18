@@ -3,7 +3,7 @@
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// 可序列化为网络数据包的数据契约。
+/// 兼容层：历史 ReForge 包序列化接口。
 /// </summary>
 public interface IReForgePacketSerializable
 {

@@ -2,13 +2,18 @@
 
 using System;
 using System.Collections.Generic;
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Multiplayer.Transport;
 
 namespace ReForgeFramework.Networking;
 
 /// <summary>
-/// Debuff 选择结果同步消息：用于把“本地已确认的选择”广播给所有 Peer，并在远端执行同样的 Power Apply。
+/// Debuff 选择同步消息：
+/// 1) 客户端发送请求给主机（IsAuthoritativeBroadcast=false）；
+/// 2) 主机权威应用后广播（IsAuthoritativeBroadcast=true）。
 /// </summary>
-internal sealed class ReForgeDebuffSelectionSyncMessage : IReForgeNetMessage
+internal sealed class ReForgeDebuffSelectionSyncMessage : INetMessage
 {
 	public ulong TargetPlayerNetId { get; set; }
 
@@ -16,41 +21,45 @@ internal sealed class ReForgeDebuffSelectionSyncMessage : IReForgeNetMessage
 
 	public bool Silent { get; set; }
 
-	public List<DebuffSelectionSyncItem> Items { get; } = new();
+	public bool IsAuthoritativeBroadcast { get; set; }
+
+	public List<ReForgeDebuffSelectionSyncItem> Items { get; } = new();
 
 	public bool ShouldBroadcast => false;
 
-	public ReForgeNetTransferMode Mode => ReForgeNetTransferMode.Reliable;
+	public NetTransferMode Mode => NetTransferMode.Reliable;
 
-	public ReForgeNetLogLevel LogLevel => ReForgeNetLogLevel.Debug;
+	public LogLevel LogLevel => LogLevel.Debug;
 
-	public void Serialize(ReForgePacketWriter writer)
+	public void Serialize(PacketWriter writer)
 	{
 		writer.WriteULong(TargetPlayerNetId);
 		writer.WriteULong(ApplierPlayerNetId);
 		writer.WriteBool(Silent);
+		writer.WriteBool(IsAuthoritativeBroadcast);
 
 		writer.WriteInt(Items.Count);
 		for (int i = 0; i < Items.Count; i++)
 		{
-			DebuffSelectionSyncItem item = Items[i];
+			ReForgeDebuffSelectionSyncItem item = Items[i];
 			writer.WriteString(item.PowerCategory ?? string.Empty);
 			writer.WriteString(item.PowerEntry ?? string.Empty);
 			writer.WriteInt(item.Amount);
 		}
 	}
 
-	public void Deserialize(ReForgePacketReader reader)
+	public void Deserialize(PacketReader reader)
 	{
 		TargetPlayerNetId = reader.ReadULong();
 		ApplierPlayerNetId = reader.ReadULong();
 		Silent = reader.ReadBool();
+		IsAuthoritativeBroadcast = reader.ReadBool();
 
 		Items.Clear();
 		int count = Math.Max(0, reader.ReadInt());
 		for (int i = 0; i < count; i++)
 		{
-			Items.Add(new DebuffSelectionSyncItem
+			Items.Add(new ReForgeDebuffSelectionSyncItem
 			{
 				PowerCategory = reader.ReadString(),
 				PowerEntry = reader.ReadString(),
@@ -58,9 +67,33 @@ internal sealed class ReForgeDebuffSelectionSyncMessage : IReForgeNetMessage
 			});
 		}
 	}
+
+	public ReForgeDebuffSelectionSyncMessage CloneForBroadcast()
+	{
+		ReForgeDebuffSelectionSyncMessage clone = new()
+		{
+			TargetPlayerNetId = TargetPlayerNetId,
+			ApplierPlayerNetId = ApplierPlayerNetId,
+			Silent = Silent,
+			IsAuthoritativeBroadcast = true
+		};
+
+		for (int i = 0; i < Items.Count; i++)
+		{
+			ReForgeDebuffSelectionSyncItem item = Items[i];
+			clone.Items.Add(new ReForgeDebuffSelectionSyncItem
+			{
+				PowerCategory = item.PowerCategory,
+				PowerEntry = item.PowerEntry,
+				Amount = item.Amount
+			});
+		}
+
+		return clone;
+	}
 }
 
-internal sealed class DebuffSelectionSyncItem
+internal sealed class ReForgeDebuffSelectionSyncItem
 {
 	public string PowerCategory { get; set; } = string.Empty;
 

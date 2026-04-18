@@ -4,6 +4,7 @@ using System;
 using Godot;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
@@ -14,7 +15,7 @@ internal static class ReForgePlayerSyncRuntime
 	private static readonly object SyncRoot = new();
 	private static bool _initialized;
 	private static bool _handlerRegistered;
-	private static readonly ReForgeMessageHandlerDelegate<ReForgePlayerSyncMessage> SyncHandler = OnSyncMessage;
+	private static readonly MessageHandlerDelegate<ReForgePlayerSyncMessage> SyncHandler = OnSyncMessage;
 
 	public static void Initialize()
 	{
@@ -52,7 +53,7 @@ internal static class ReForgePlayerSyncRuntime
 			return false;
 		}
 
-		if (ReForge.Network.LocalPeerId == 1)
+		if (ReForge.Network.IsHostAuthority)
 		{
 			return SyncSnapshotToAll(player);
 		}
@@ -85,7 +86,13 @@ internal static class ReForgePlayerSyncRuntime
 			return false;
 		}
 
-		ReForge.Network.SendTo(1, new ReForgePlayerSyncMessage
+		ulong hostPeerId = ReForge.Network.HostPeerId;
+		if (hostPeerId == 0)
+		{
+			return false;
+		}
+
+		ReForge.Network.SendTo(hostPeerId, new ReForgePlayerSyncMessage
 		{
 			Snapshot = CaptureSnapshot(player)
 		});
@@ -145,7 +152,7 @@ internal static class ReForgePlayerSyncRuntime
 
 			targetPlayer.SyncWithSerializedPlayer(message.Snapshot);
 
-			if (ReForge.Network.IsConnected && ReForge.Network.LocalPeerId == 1 && senderId != ReForge.Network.LocalPeerId)
+			if (ReForge.Network.IsConnected && ReForge.Network.IsHostAuthority && senderId != ReForge.Network.LocalPeerId)
 			{
 				ReForge.Network.Send(new ReForgePlayerSyncMessage
 				{

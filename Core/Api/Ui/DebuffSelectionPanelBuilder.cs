@@ -10,7 +10,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
-using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Localization;
@@ -26,8 +26,7 @@ public sealed class DebuffSelectionPanelBuilder
 {
 	private static readonly object NetworkSyncLock = new();
 	private static bool _networkSyncHandlerRegistered;
-	private static TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>? _pendingSelectionCompletionSource;
-	private static readonly ReForgeMessageHandlerDelegate<ReForgeDebuffSelectionSyncMessage> DebuffSelectionSyncHandler = OnDebuffSelectionSynced;
+	private static readonly MessageHandlerDelegate<ReForgeDebuffSelectionSyncMessage> DebuffSelectionSyncHandler = OnDebuffSelectionSynced;
 
 	private readonly List<DebuffSelectionEntry> _entries = new();
 	private LocString? _title;
@@ -36,6 +35,33 @@ public sealed class DebuffSelectionPanelBuilder
 	private bool _cancelable = true;
 	private bool _randomModeEnabled;
 	private int _maxDisplayCount;
+
+	internal static void InitializeNetworkSyncRuntime()
+	{
+		if (_networkSyncHandlerRegistered)
+		{
+			return;
+		}
+
+		lock (NetworkSyncLock)
+		{
+			if (_networkSyncHandlerRegistered)
+			{
+				return;
+			}
+
+			try
+			{
+				ReForge.Network.RegisterHandler(DebuffSelectionSyncHandler);
+				_networkSyncHandlerRegistered = true;
+				GD.Print("[ReForge.UI.DebuffSelection] Network sync runtime registered.");
+			}
+			catch (Exception ex)
+			{
+				GD.PrintErr($"[ReForge.UI.DebuffSelection] Network sync registration failed. {ex.GetType().Name}: {ex.Message}");
+			}
+		}
+	}
 
 	/// <summary>
 	/// 设置弹窗标题（本地化文本）。
@@ -222,63 +248,197 @@ public sealed class DebuffSelectionPanelBuilder
 		bool silent = false)
 	{
 		ArgumentNullException.ThrowIfNull(target);
-		EnsureNetworkSyncHandlerRegistered();
-
-		if (ReForge.Network.IsConnected && !ReForge.BattleEvents.IsAuthority())
-		{
-			return await WaitForSyncedSelectionAsync();
-		}
+		InitializeNetworkSyncRuntime();
 
 		IReadOnlyList<DebuffSelectionResult> selected = await ShowAsync();
-		await ApplySelectionToTargetAsync(selected, target, applier, cardSource, silent);
-
-		if (ShouldBroadcastSelection(target, selected))
+		if (selected.Count == 0)
 		{
-			RegisterPendingSelectionWaiter();
-			BroadcastSelection(target, applier, selected, silent);
+			return selected;
 		}
 
+		if (!ReForge.Network.IsConnected || !target.IsPlayer || target.Player == null)
+		{
+			await ApplySelectionToTargetAsync(selected, target, applier, cardSource, silent);
+			return selected;
+		}
+
+		ReForgeDebuffSelectionSyncMessage request = BuildSyncMessage(
+			target,
+			applier,
+			selected,
+			silent,
+			isAuthoritativeBroadcast: false);
+
+		if (ReForge.Network.IsHostAuthority)
+		{
+			await ApplySelectionToTargetAsync(selected, target, applier, cardSource, silent);
+			BroadcastSelectionFromHost(request);
+			return selected;
+		}
+
+		ulong hostPeerId = ReForge.Network.HostPeerId;
+		if (hostPeerId == 0)
+		{
+			GD.PrintErr("[ReForge.UI.DebuffSelection] Host peer id unavailable. Selection request was not sent.");
+			return selected;
+		}
+
+		ReForge.Network.SendTo(hostPeerId, request);
+		GD.Print($"[ReForge.UI.DebuffSelection] Client request sent. items={request.Items.Count}.");
 		return selected;
 	}
 
-	private static void RegisterPendingSelectionWaiter()
+	private static ReForgeDebuffSelectionSyncMessage BuildSyncMessage(
+		Creature target,
+		Creature? applier,
+		IReadOnlyList<DebuffSelectionResult> selected,
+		bool silent,
+		bool isAuthoritativeBroadcast)
 	{
-		lock (NetworkSyncLock)
+		ReForgeDebuffSelectionSyncMessage message = new()
 		{
-			if (_pendingSelectionCompletionSource == null || _pendingSelectionCompletionSource.Task.IsCompleted)
+			TargetPlayerNetId = target.Player!.NetId,
+			ApplierPlayerNetId = applier?.Player?.NetId ?? 0,
+			Silent = silent,
+			IsAuthoritativeBroadcast = isAuthoritativeBroadcast
+		};
+
+		for (int i = 0; i < selected.Count; i++)
+		{
+			DebuffSelectionResult item = selected[i];
+			message.Items.Add(new ReForgeDebuffSelectionSyncItem
 			{
-				_pendingSelectionCompletionSource = new TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+				PowerCategory = item.DebuffId.Category,
+				PowerEntry = item.DebuffId.Entry,
+				Amount = item.Amount
+			});
+		}
+
+		return message;
+	}
+
+	private static void BroadcastSelectionFromHost(ReForgeDebuffSelectionSyncMessage request)
+	{
+		ReForgeDebuffSelectionSyncMessage broadcast = request.CloneForBroadcast();
+		ReForge.Network.Send(broadcast);
+		GD.Print($"[ReForge.UI.DebuffSelection] Host broadcast sent. items={broadcast.Items.Count}.");
+	}
+
+	private static void OnDebuffSelectionSynced(ReForgeDebuffSelectionSyncMessage message, ulong senderId)
+	{
+		_ = OnDebuffSelectionSyncedAsync(message, senderId);
+	}
+
+	private static async Task OnDebuffSelectionSyncedAsync(ReForgeDebuffSelectionSyncMessage message, ulong senderId)
+	{
+		try
+		{
+			if (!message.IsAuthoritativeBroadcast)
+			{
+				if (!ReForge.Network.IsHostAuthority)
+				{
+					return;
+				}
+
+				if (senderId == ReForge.Network.LocalPeerId)
+				{
+					return;
+				}
+
+				if (!TryResolveTargetAndApplier(message, out Creature requestTarget, out Creature? requestApplier))
+				{
+					return;
+				}
+
+				IReadOnlyList<DebuffSelectionResult> appliedOnHost = await ApplySelectionMessageToTargetAsync(message, requestTarget, requestApplier);
+				if (appliedOnHost.Count > 0)
+				{
+					BroadcastSelectionFromHost(message);
+				}
+
+				return;
 			}
+
+			if (ReForge.Network.IsHostAuthority)
+			{
+				// 主机已在请求阶段权威执行，避免广播回环二次应用。
+				return;
+			}
+
+			if (!TryResolveTargetAndApplier(message, out Creature target, out Creature? applier))
+			{
+				return;
+			}
+
+			IReadOnlyList<DebuffSelectionResult> appliedOnClient = await ApplySelectionMessageToTargetAsync(message, target, applier);
+			GD.Print($"[ReForge.UI.DebuffSelection] Client applied authoritative broadcast. applied={appliedOnClient.Count}.");
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync handling failed. {ex}");
 		}
 	}
 
-	private static Task<IReadOnlyList<DebuffSelectionResult>> WaitForSyncedSelectionAsync()
+	private static bool TryResolveTargetAndApplier(
+		ReForgeDebuffSelectionSyncMessage message,
+		out Creature target,
+		out Creature? applier)
 	{
-		lock (NetworkSyncLock)
-		{
-			if (_pendingSelectionCompletionSource == null || _pendingSelectionCompletionSource.Task.IsCompleted)
-			{
-				_pendingSelectionCompletionSource = new TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
-			}
+		target = null!;
+		applier = null;
 
-			return _pendingSelectionCompletionSource.Task;
-		}
-	}
-
-	private static bool ShouldBroadcastSelection(Creature target, IReadOnlyList<DebuffSelectionResult> selected)
-	{
-		if (!ReForge.Network.IsConnected || selected.Count == 0)
+		RunState? runState = RunManager.Instance?.DebugOnlyGetState();
+		if (runState == null)
 		{
+			GD.PrintErr("[ReForge.UI.DebuffSelection] Sync skipped: RunState unavailable.");
 			return false;
 		}
 
-		if (!target.IsPlayer || target.Player == null)
+		var targetPlayer = runState.GetPlayer(message.TargetPlayerNetId);
+		if (targetPlayer == null)
 		{
-			GD.Print("[ReForge.UI.DebuffSelection] Multiplayer sync skipped: target is not a player creature.");
+			GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync skipped: target player not found. netId={message.TargetPlayerNetId}.");
 			return false;
+		}
+
+		target = targetPlayer.Creature;
+		if (message.ApplierPlayerNetId != 0)
+		{
+			applier = runState.GetPlayer(message.ApplierPlayerNetId)?.Creature;
 		}
 
 		return true;
+	}
+
+	private static async Task<IReadOnlyList<DebuffSelectionResult>> ApplySelectionMessageToTargetAsync(
+		ReForgeDebuffSelectionSyncMessage message,
+		Creature target,
+		Creature? applier)
+	{
+		List<DebuffSelectionResult> applied = new(message.Items.Count);
+		for (int i = 0; i < message.Items.Count; i++)
+		{
+			ReForgeDebuffSelectionSyncItem item = message.Items[i];
+			if (item.Amount <= 0 || string.IsNullOrWhiteSpace(item.PowerCategory) || string.IsNullOrWhiteSpace(item.PowerEntry))
+			{
+				continue;
+			}
+
+			ModelId powerId = new(item.PowerCategory, item.PowerEntry);
+			PowerModel? debuff = ModelDb.GetByIdOrNull<PowerModel>(powerId);
+			if (debuff == null)
+			{
+				GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync skipped: debuff not found. powerId={powerId}.");
+				continue;
+			}
+
+			EnsureDebuff(debuff);
+			PowerModel mutablePower = debuff.ToMutable();
+			await PowerCmd.Apply(mutablePower, target, item.Amount, applier, cardSource: null, message.Silent);
+			applied.Add(new DebuffSelectionResult(powerId, debuff, item.Amount));
+		}
+
+		return applied;
 	}
 
 	private static async Task ApplySelectionToTargetAsync(
@@ -293,154 +453,6 @@ public sealed class DebuffSelectionPanelBuilder
 			PowerModel mutablePower = result.Debuff.ToMutable();
 			await PowerCmd.Apply(mutablePower, target, result.Amount, applier, cardSource, silent);
 		}
-	}
-
-	private static void EnsureNetworkSyncHandlerRegistered()
-	{
-		if (_networkSyncHandlerRegistered)
-		{
-			return;
-		}
-
-		lock (NetworkSyncLock)
-		{
-			if (_networkSyncHandlerRegistered)
-			{
-				return;
-			}
-
-			ReForge.Network.RegisterHandler(DebuffSelectionSyncHandler);
-			_networkSyncHandlerRegistered = true;
-		}
-	}
-
-	private static void BroadcastSelection(
-		Creature target,
-		Creature? applier,
-		IReadOnlyList<DebuffSelectionResult> selected,
-		bool silent)
-	{
-		Player? targetPlayer = target.Player;
-		if (targetPlayer == null)
-		{
-			return;
-		}
-
-		ReForgeDebuffSelectionSyncMessage message = new()
-		{
-			TargetPlayerNetId = targetPlayer.NetId,
-			ApplierPlayerNetId = applier?.Player?.NetId ?? 0,
-			Silent = silent
-		};
-
-		for (int i = 0; i < selected.Count; i++)
-		{
-			DebuffSelectionResult item = selected[i];
-			message.Items.Add(new DebuffSelectionSyncItem
-			{
-				PowerCategory = item.DebuffId.Category,
-				PowerEntry = item.DebuffId.Entry,
-				Amount = item.Amount
-			});
-		}
-
-		ReForge.Network.Send(message);
-		GD.Print($"[ReForge.UI.DebuffSelection] Broadcasted debuff selection sync. target={message.TargetPlayerNetId}, itemCount={message.Items.Count}.");
-	}
-
-	private static void OnDebuffSelectionSynced(ReForgeDebuffSelectionSyncMessage message, ulong senderId)
-	{
-		if (senderId == ReForge.Network.LocalPeerId)
-		{
-			return;
-		}
-
-		RunState? runState = RunManager.Instance?.DebugOnlyGetState();
-		if (runState == null)
-		{
-			return;
-		}
-
-		Player? targetPlayer = runState.Players.FirstOrDefault(player => player.NetId == message.TargetPlayerNetId);
-		if (targetPlayer == null || !targetPlayer.Creature.IsAlive)
-		{
-			GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync apply skipped: target player not found or dead. target={message.TargetPlayerNetId}.");
-			return;
-		}
-
-		Creature? applierCreature = null;
-		if (message.ApplierPlayerNetId != 0)
-		{
-			applierCreature = runState.Players
-				.FirstOrDefault(player => player.NetId == message.ApplierPlayerNetId)
-				?.Creature;
-		}
-
-		ApplySyncedSelectionImmediate(message, targetPlayer.Creature, applierCreature);
-	}
-
-	private static void ApplySyncedSelectionImmediate(
-		ReForgeDebuffSelectionSyncMessage message,
-		Creature target,
-		Creature? applier)
-	{
-		List<DebuffSelectionResult> appliedResults = new(message.Items.Count);
-		for (int i = 0; i < message.Items.Count; i++)
-		{
-			DebuffSelectionSyncItem item = message.Items[i];
-			if (item.Amount <= 0 || string.IsNullOrWhiteSpace(item.PowerCategory) || string.IsNullOrWhiteSpace(item.PowerEntry))
-			{
-				continue;
-			}
-
-			ModelId powerId = new(item.PowerCategory, item.PowerEntry);
-			PowerModel? debuff = ModelDb.GetByIdOrNull<PowerModel>(powerId);
-			if (debuff == null)
-			{
-				GD.PrintErr($"[ReForge.UI.DebuffSelection] Sync apply skipped: power not found. id={powerId}.");
-				continue;
-			}
-
-			ApplyPowerImmediate(debuff, target, item.Amount, applier, message.Silent);
-			appliedResults.Add(new DebuffSelectionResult(powerId, debuff, item.Amount));
-		}
-
-		CompletePendingSelection(appliedResults);
-		GD.Print($"[ReForge.UI.DebuffSelection] Synced debuff selection applied. target={message.TargetPlayerNetId}, itemCount={message.Items.Count}.");
-	}
-
-	private static void CompletePendingSelection(IReadOnlyList<DebuffSelectionResult> results)
-	{
-		TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>? pending;
-		lock (NetworkSyncLock)
-		{
-			pending = _pendingSelectionCompletionSource;
-			_pendingSelectionCompletionSource = null;
-		}
-
-		pending?.TrySetResult(results);
-	}
-
-	private static void ApplyPowerImmediate(PowerModel canonicalPower, Creature target, int amount, Creature? applier, bool silent)
-	{
-		if (amount <= 0 || !target.CanReceivePowers)
-		{
-			return;
-		}
-
-		if (!canonicalPower.IsInstanced)
-		{
-			PowerModel? existing = target.GetPower(canonicalPower.Id);
-			if (existing != null)
-			{
-				existing.SetAmount(existing.Amount + amount, silent);
-				return;
-			}
-		}
-
-		PowerModel mutablePower = canonicalPower.ToMutable();
-		mutablePower.Applier = applier;
-		mutablePower.ApplyInternal(target, amount, silent);
 	}
 
 	private static void EnsureDebuff(PowerModel power)

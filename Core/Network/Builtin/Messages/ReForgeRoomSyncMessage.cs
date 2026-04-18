@@ -1,6 +1,9 @@
 #nullable enable
 
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Map;
+using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Multiplayer.Transport;
 using MegaCrit.Sts2.Core.Rooms;
 
 namespace ReForgeFramework.Networking;
@@ -19,7 +22,7 @@ internal enum ReForgeRoomSyncOperation
 /// <summary>
 /// 房间设置/跳转同步消息。
 /// </summary>
-internal sealed class ReForgeRoomSyncMessage : IReForgeNetMessage
+internal sealed class ReForgeRoomSyncMessage : INetMessage
 {
 	public ReForgeRoomSyncOperation Operation { get; set; }
 
@@ -43,11 +46,11 @@ internal sealed class ReForgeRoomSyncMessage : IReForgeNetMessage
 
 	public bool ShouldBroadcast => false;
 
-	public ReForgeNetTransferMode Mode => ReForgeNetTransferMode.Reliable;
+	public NetTransferMode Mode => NetTransferMode.Reliable;
 
-	public ReForgeNetLogLevel LogLevel => ReForgeNetLogLevel.Info;
+	public LogLevel LogLevel => LogLevel.Info;
 
-	public void Serialize(ReForgePacketWriter writer)
+	public void Serialize(PacketWriter writer)
 	{
 		writer.WriteEnum(Operation);
 		writer.WriteEnum(RoomType);
@@ -61,7 +64,7 @@ internal sealed class ReForgeRoomSyncMessage : IReForgeNetMessage
 		writer.WriteBool(DoTransition);
 	}
 
-	public void Deserialize(ReForgePacketReader reader)
+	public void Deserialize(PacketReader reader)
 	{
 		Operation = reader.ReadEnum<ReForgeRoomSyncOperation>();
 		RoomType = reader.ReadEnum<RoomType>();
