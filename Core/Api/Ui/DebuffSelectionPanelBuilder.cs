@@ -26,6 +26,7 @@ public sealed class DebuffSelectionPanelBuilder
 {
 	private static readonly object NetworkSyncLock = new();
 	private static bool _networkSyncHandlerRegistered;
+	private static TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>? _pendingSelectionCompletionSource;
 	private static readonly ReForgeMessageHandlerDelegate<ReForgeDebuffSelectionSyncMessage> DebuffSelectionSyncHandler = OnDebuffSelectionSynced;
 
 	private readonly List<DebuffSelectionEntry> _entries = new();
@@ -223,15 +224,45 @@ public sealed class DebuffSelectionPanelBuilder
 		ArgumentNullException.ThrowIfNull(target);
 		EnsureNetworkSyncHandlerRegistered();
 
+		if (ReForge.Network.IsConnected && !ReForge.BattleEvents.IsAuthority())
+		{
+			return await WaitForSyncedSelectionAsync();
+		}
+
 		IReadOnlyList<DebuffSelectionResult> selected = await ShowAsync();
 		await ApplySelectionToTargetAsync(selected, target, applier, cardSource, silent);
 
 		if (ShouldBroadcastSelection(target, selected))
 		{
+			RegisterPendingSelectionWaiter();
 			BroadcastSelection(target, applier, selected, silent);
 		}
 
 		return selected;
+	}
+
+	private static void RegisterPendingSelectionWaiter()
+	{
+		lock (NetworkSyncLock)
+		{
+			if (_pendingSelectionCompletionSource == null || _pendingSelectionCompletionSource.Task.IsCompleted)
+			{
+				_pendingSelectionCompletionSource = new TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+			}
+		}
+	}
+
+	private static Task<IReadOnlyList<DebuffSelectionResult>> WaitForSyncedSelectionAsync()
+	{
+		lock (NetworkSyncLock)
+		{
+			if (_pendingSelectionCompletionSource == null || _pendingSelectionCompletionSource.Task.IsCompleted)
+			{
+				_pendingSelectionCompletionSource = new TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
+			}
+
+			return _pendingSelectionCompletionSource.Task;
+		}
 	}
 
 	private static bool ShouldBroadcastSelection(Creature target, IReadOnlyList<DebuffSelectionResult> selected)
@@ -345,14 +376,15 @@ public sealed class DebuffSelectionPanelBuilder
 				?.Creature;
 		}
 
-		TaskHelper.RunSafely(ApplySyncedSelectionAsync(message, targetPlayer.Creature, applierCreature));
+		ApplySyncedSelectionImmediate(message, targetPlayer.Creature, applierCreature);
 	}
 
-	private static async Task ApplySyncedSelectionAsync(
+	private static void ApplySyncedSelectionImmediate(
 		ReForgeDebuffSelectionSyncMessage message,
 		Creature target,
 		Creature? applier)
 	{
+		List<DebuffSelectionResult> appliedResults = new(message.Items.Count);
 		for (int i = 0; i < message.Items.Count; i++)
 		{
 			DebuffSelectionSyncItem item = message.Items[i];
@@ -369,11 +401,46 @@ public sealed class DebuffSelectionPanelBuilder
 				continue;
 			}
 
-			PowerModel mutablePower = debuff.ToMutable();
-			await PowerCmd.Apply(mutablePower, target, item.Amount, applier, cardSource: null, message.Silent);
+			ApplyPowerImmediate(debuff, target, item.Amount, applier, message.Silent);
+			appliedResults.Add(new DebuffSelectionResult(powerId, debuff, item.Amount));
 		}
 
+		CompletePendingSelection(appliedResults);
 		GD.Print($"[ReForge.UI.DebuffSelection] Synced debuff selection applied. target={message.TargetPlayerNetId}, itemCount={message.Items.Count}.");
+	}
+
+	private static void CompletePendingSelection(IReadOnlyList<DebuffSelectionResult> results)
+	{
+		TaskCompletionSource<IReadOnlyList<DebuffSelectionResult>>? pending;
+		lock (NetworkSyncLock)
+		{
+			pending = _pendingSelectionCompletionSource;
+			_pendingSelectionCompletionSource = null;
+		}
+
+		pending?.TrySetResult(results);
+	}
+
+	private static void ApplyPowerImmediate(PowerModel canonicalPower, Creature target, int amount, Creature? applier, bool silent)
+	{
+		if (amount <= 0 || !target.CanReceivePowers)
+		{
+			return;
+		}
+
+		if (!canonicalPower.IsInstanced)
+		{
+			PowerModel? existing = target.GetPower(canonicalPower.Id);
+			if (existing != null)
+			{
+				existing.SetAmount(existing.Amount + amount, silent);
+				return;
+			}
+		}
+
+		PowerModel mutablePower = canonicalPower.ToMutable();
+		mutablePower.Applier = applier;
+		mutablePower.ApplyInternal(target, amount, silent);
 	}
 
 	private static void EnsureDebuff(PowerModel power)
