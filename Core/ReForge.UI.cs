@@ -46,7 +46,7 @@ public static partial class ReForge
 
 		/// <summary>
 		/// 创建“选择负面 Buff（Debuff）”面板构建器。
-		/// 用法：AddDebuff(..., amount) 后调用 ShowAsync / ShowAndApplyAsync。
+		/// 用法：AddDebuff(..., amount) 后调用 ShowAsync 获取玩家选择，再由上游决定如何应用。
 		/// </summary>
 		public static DebuffSelectionPanelBuilder CreateDebuffSelectionPanel()
 		{

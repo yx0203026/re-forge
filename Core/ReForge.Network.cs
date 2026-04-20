@@ -348,7 +348,6 @@ public static partial class ReForge
 			}
 
 			ResolveService();
-			DebuffSelectionPanelBuilder.InitializeNetworkSyncRuntime();
 		}
 	}
 }
